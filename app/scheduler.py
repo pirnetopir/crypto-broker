@@ -166,7 +166,7 @@ async def job_30m():
             ids = [r["id"] for r in pre]
 
             # 2) hourly grafy
-            charts = await fetch_many_hourly(ids, days=10, concurrency=2, sleep_between=1.5)
+            charts = await fetch_many_hourly(ids, days=10)
 
             # 3) obohatenie metrikami
             enriched = []
@@ -183,7 +183,7 @@ async def job_30m():
         # FALLBACK: markets prázdne – použi pevný zoznam veľkých coinov
         logging.warning("markets empty (rate-limit?). Using BOOTSTRAP_IDS fallback.")
         ids = [i.strip() for i in DEFAULT_BOOTSTRAP_IDS if i.strip()]
-        charts = await fetch_many_hourly(ids, days=10, concurrency=2, sleep_between=1.5)
+        charts = await fetch_many_hourly(ids, days=10)
         enriched = []
         for cid, data in charts.items():
             row = _enrich_from_prices(cid, data.get("prices", []), vol24=1.0)
