@@ -33,6 +33,10 @@ async def job_30m():
         logging.info("job_30m start")
         # 1) načítaj top200 trh
         markets = await get_markets_top200_cached("usd", ttl_minutes=720)  # 12 hodín cache
+        if not markets:
+    # nič neprišlo (limit, výpadok) – skončíme potichu, bez chyby
+    logging.warning("markets empty (rate-limit?). Skipping this run.")
+    return
         # vyhoď stablecoiny
         STABLE_IDS = {"tether", "usd-coin", "dai", "usdd", "frax"}
         rows = []
