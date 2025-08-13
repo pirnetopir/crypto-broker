@@ -4,3 +4,5 @@ httpx
 apscheduler
 tzlocal
 pytz
+numpy
+pandas
