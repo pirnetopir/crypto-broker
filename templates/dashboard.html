@@ -8,22 +8,33 @@
 </head>
 <body class="bg-slate-50 text-slate-800">
   <div class="max-w-6xl mx-auto p-6">
-    <header class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold">Krypto Broker – Dashboard</h1>
-      <div class="flex gap-2">
-        <button id="runNowBtn" class="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-90">Run now</button>
-        <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-white border">Refresh</button>
+    <header class="mb-6">
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold">Krypto Broker – Dashboard</h1>
+        <div class="flex gap-2">
+          <button id="runNowBtn" class="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-90">Run now</button>
+          <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-white border">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Panel s rozpočtom pre návrh investície -->
+      <div class="mt-4 p-4 bg-white border rounded-xl">
+        <div class="flex flex-col md:flex-row md:items-center md:gap-6 gap-3">
+          <div class="text-sm text-slate-600">
+            Plán: <span class="font-mono">07:30</span>, <span class="font-mono">13:00</span>, <span class="font-mono">22:00</span> ({{ tz }})
+            · PRESELECT: <span class="font-mono">{{ preselect }}</span>
+            · PICK_TOP: <span class="font-mono">10</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <label for="budgetInput" class="text-sm text-slate-700">Rozpočet na beh (€):</label>
+            <input id="budgetInput" type="number" step="10" min="0" class="w-32 px-3 py-2 border rounded-lg" placeholder="1000" />
+            <button id="saveBudgetBtn" class="px-3 py-2 rounded-lg bg-slate-900 text-white">Uložiť</button>
+            <button id="resetBudgetBtn" class="px-3 py-2 rounded-lg bg-white border">Reset</button>
+          </div>
+          <div id="status" class="text-sm text-slate-600 md:ml-auto">Načítavam…</div>
+        </div>
       </div>
     </header>
-
-    <section class="mb-4">
-      <div id="status" class="text-sm text-slate-600">Načítavam…</div>
-      <div class="mt-1 text-xs text-slate-500">
-        Plán: <span class="font-mono">07:30</span>, <span class="font-mono">13:00</span>, <span class="font-mono">22:00</span> ({{ tz }})
-        · PRESELECT: <span class="font-mono">{{ preselect }}</span>
-        · PICK_TOP: <span class="font-mono">10</span>
-      </div>
-    </section>
 
     <!-- Keď ešte nie je signál -->
     <section id="emptyBox" class="hidden p-6 border rounded-xl bg-white">
@@ -100,6 +111,7 @@
   </div>
 
   <script>
+    // ----------------- Pomocné -----------------
     const statusEl = document.getElementById('status');
     const emptyBox = document.getElementById('emptyBox');
     const signalBox = document.getElementById('signalBox');
@@ -112,7 +124,30 @@
     const pfBody = document.getElementById('pfBody');
     const pfSummary = document.getElementById('pfSummary');
 
-    // Načíta posledný signál a vykreslí TOP N (PICK_TOP)
+    const budgetInput = document.getElementById('budgetInput');
+    const saveBudgetBtn = document.getElementById('saveBudgetBtn');
+    const resetBudgetBtn = document.getElementById('resetBudgetBtn');
+
+    const BUDGET_KEY = 'kb_budget_eur';
+
+    function getBudget() {
+      const v = Number(localStorage.getItem(BUDGET_KEY) || '1000');
+      return isFinite(v) && v >= 0 ? v : 1000;
+    }
+    function setBudget(v) {
+      localStorage.setItem(BUDGET_KEY, String(v));
+    }
+    function roundToStep(v, step = 10) {
+      if (!isFinite(v)) return 0;
+      return Math.round(v / step) * step;
+    }
+    function fmtEUR(v) {
+      try {
+        return new Intl.NumberFormat('sk-SK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v);
+      } catch { return `${Math.round(v)} €`; }
+    }
+
+    // ----------------- Signál -----------------
     async function loadSignal() {
       statusEl.textContent = 'Načítavam…';
       try {
@@ -135,8 +170,11 @@
           'px-3 py-1 rounded-full text-sm font-semibold ' +
           (regime === 'risk-on' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800');
 
+        const budget = getBudget();
         picksBody.innerHTML = '';
         (data.picks || []).forEach((p, idx) => {
+          const w = Number(p.weight || 0);
+          const suggested = roundToStep(budget * w, 10); // návrh = rozpočet × váha
           const tr = document.createElement('tr');
           tr.className = 'border-b';
           tr.innerHTML = `
@@ -145,14 +183,17 @@
             <td class="py-2">${p.name}</td>
             <td class="py-2 font-mono">${Number(p.price).toFixed(6)}</td>
             <td class="py-2 font-mono">${Number(p.score).toFixed(3)}</td>
-            <td class="py-2 font-mono">${Number(p.weight || 0).toFixed(3)}</td>
+            <td class="py-2 font-mono">${w.toFixed(3)}</td>
             <td class="py-2 font-mono">${(Number(p.mom_24h) * 100).toFixed(2)}%</td>
             <td class="py-2 font-mono">${(Number(p.atr_pct) * 100).toFixed(2)}%</td>
             <td class="py-2">
               <button
                 class="px-3 py-1 rounded bg-emerald-600 text-white"
                 data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
-                onclick="invest(this)">Investovať</button>
+                data-weight="${w}" data-suggested="${suggested}"
+                onclick="invest(this)">
+                Investovať ${suggested > 0 ? `(&asymp; ${fmtEUR(suggested)})` : ''}
+              </button>
             </td>
           `;
           picksBody.appendChild(tr);
@@ -165,12 +206,14 @@
       }
     }
 
-    // Vytvorí obchod podľa vstupu používateľa
+    // ----------------- Invest / Close -----------------
     async function invest(btn) {
       const coin_id = btn.getAttribute('data-id');
       const symbol = btn.getAttribute('data-symbol');
       const name = btn.getAttribute('data-name');
-      const amt = prompt(`Koľko chceš investovať do ${symbol}? (EUR)`, "100");
+      const suggested = Number(btn.getAttribute('data-suggested') || '0');
+      const def = suggested > 0 ? String(suggested) : "100";
+      const amt = prompt(`Koľko chceš investovať do ${symbol}? (EUR)\nNávrh: ${fmtEUR(Number(def))}`, def);
       if (!amt) return;
       const payload = { coin_id, symbol, name, invested_eur: Number(amt) };
       await fetch('/api/trades', {
@@ -181,7 +224,6 @@
       loadPortfolio();
     }
 
-    // Uzatvorí obchod (zadá sa predajná cena)
     async function closeTrade(id) {
       const amt = prompt("Za koľko EUR si predal?", "120");
       if (!amt) return;
@@ -193,7 +235,7 @@
       loadPortfolio();
     }
 
-    // Načíta portfólio + sumár PnL
+    // ----------------- Portfólio -----------------
     async function loadPortfolio() {
       try {
         const r = await fetch('/api/trades', { cache: 'no-store' });
@@ -233,7 +275,26 @@
       }
     }
 
-    // Handlery
+    // ----------------- Ovládanie rozpočtu -----------------
+    function initBudgetControls() {
+      budgetInput.value = String(getBudget());
+      saveBudgetBtn.addEventListener('click', () => {
+        const v = Number(budgetInput.value || '0');
+        if (!isFinite(v) || v < 0) return alert('Zadaj kladné číslo.');
+        setBudget(v);
+        loadSignal(); // prepočíta návrhy
+      });
+      resetBudgetBtn.addEventListener('click', () => {
+        budgetInput.value = '1000';
+        setBudget(1000);
+        loadSignal();
+      });
+      budgetInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') saveBudgetBtn.click();
+      });
+    }
+
+    // ----------------- Handlery -----------------
     document.getElementById('refreshBtn').addEventListener('click', () => {
       loadSignal(); loadPortfolio();
     });
@@ -252,7 +313,8 @@
       }
     });
 
-    // Init
+    // ----------------- Init -----------------
+    initBudgetControls();
     loadSignal();
     loadPortfolio();
     setInterval(() => { loadSignal(); loadPortfolio(); }, 60000);
