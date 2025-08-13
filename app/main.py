@@ -33,3 +33,9 @@ def get_signal():
 async def run_now():
     await job_30m()
     return {"ok": True}
+from .services.coingecko import ping as cg_ping
+
+@app.get("/cg-ping")
+async def cg_ping():
+    data = await cg_ping()
+    return {"ok": True, "plan": os.getenv("COINGECKO_PLAN"), "resp": data}
