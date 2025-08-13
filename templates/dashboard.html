@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Krypto Broker – Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-5xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold">Krypto Broker – Dashboard</h1>
+      <div class="flex gap-2">
+        <button id="runNowBtn" class="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-90">Run now</button>
+        <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-white border">Refresh</button>
+      </div>
+    </header>
+
+    <section class="mb-4">
+      <div id="status" class="text-sm text-slate-600">Načítavam…</div>
+      <div class="mt-1 text-xs text-slate-500">
+        Plán: <span class="font-mono">07:30</span>, <span class="font-mono">13:00</span>, <span class="font-mono">22:00</span> ({{ tz }})
+        · PRESELECT: <span class="font-mono">{{ preselect }}</span>
+      </div>
+    </section>
+
+    <section id="emptyBox" class="hidden p-6 border rounded-xl bg-white">
+      <p class="mb-2">Zatiaľ nie je uložený žiadny signál.</p>
+      <p class="text-sm text-slate-600">Klikni <b>Run now</b> alebo počkaj na najbližší plánovaný čas.</p>
+    </section>
+
+    <section id="signalBox" class="hidden">
+      <div class="p-6 border rounded-xl bg-white">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <div class="text-sm text-slate-500">Posledná aktualizácia</div>
+            <div id="sigTime" class="text-lg font-semibold">—</div>
+          </div>
+          <div>
+            <span id="regimeBadge" class="px-3 py-1 rounded-full text-sm font-semibold">—</span>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="text-left text-slate-600 border-b">
+                <th class="py-2">#</th>
+                <th class="py-2">Symbol</th>
+                <th class="py-2">Názov</th>
+                <th class="py-2">Cena</th>
+                <th class="py-2">Skóre</th>
+                <th class="py-2">Váha</th>
+                <th class="py-2">24h</th>
+                <th class="py-2">ATR%</th>
+              </tr>
+            </thead>
+            <tbody id="picksBody"></tbody>
+          </table>
+        </div>
+
+        <div id="note" class="mt-3 text-xs text-slate-500"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const emptyBox = document.getElementById('emptyBox');
+    const signalBox = document.getElementById('signalBox');
+    const picksBody = document.getElementById('picksBody');
+    const sigTime = document.getElementById('sigTime');
+    const regimeBadge = document.getElementById('regimeBadge');
+    const noteEl = document.getElementById('note');
+
+    async function loadSignal() {
+      statusEl.textContent = 'Načítavam…';
+      try {
+        const r = await fetch('/signal', { cache: 'no-store' });
+        const data = await r.json();
+        if (!data.ready) {
+          emptyBox.classList.remove('hidden');
+          signalBox.classList.add('hidden');
+          statusEl.textContent = 'Žiadny signál – skús Run now alebo počkaj na ďalší beh.';
+          return;
+        }
+        emptyBox.classList.add('hidden');
+        signalBox.classList.remove('hidden');
+        statusEl.textContent = 'OK';
+
+        sigTime.textContent = data.created_at || '—';
+        const regime = (data.regime || '').toLowerCase();
+        regimeBadge.textContent = regime === 'risk-on' ? 'RISK-ON' : 'RISK-OFF';
+        regimeBadge.className =
+          'px-3 py-1 rounded-full text-sm font-semibold ' +
+          (regime === 'risk-on' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800');
+
+        picksBody.innerHTML = '';
+        (data.picks || []).forEach((p, idx) => {
+          const tr = document.createElement('tr');
+          tr.className = 'border-b';
+          tr.innerHTML = `
+            <td class="py-2">${idx + 1}</td>
+            <td class="py-2 font-semibold">${p.symbol}</td>
+            <td class="py-2">${p.name}</td>
+            <td class="py-2 font-mono">${Number(p.price).toFixed(6)}</td>
+            <td class="py-2 font-mono">${Number(p.score).toFixed(3)}</td>
+            <td class="py-2 font-mono">${Number(p.weight || 0).toFixed(3)}</td>
+            <td class="py-2 font-mono">${(Number(p.mom_24h) * 100).toFixed(2)}%</td>
+            <td class="py-2 font-mono">${(Number(p.atr_pct) * 100).toFixed(2)}%</td>
+          `;
+          picksBody.appendChild(tr);
+        });
+
+        noteEl.textContent = data.note || '';
+      } catch (e) {
+        statusEl.textContent = 'Chyba pri načítaní.';
+      }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadSignal);
+    document.getElementById('runNowBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('runNowBtn');
+      const old = btn.textContent;
+      btn.textContent = 'Bežím…';
+      btn.disabled = true;
+      try {
+        await fetch('/run-now', { cache: 'no-store' });
+        // daj appke chvíľu na dokončenie
+        setTimeout(loadSignal, 4000);
+      } finally {
+        setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1500);
+      }
+    });
+
+    loadSignal();
+    // auto-refresh každých 60 s
+    setInterval(loadSignal, 60000);
+  </script>
+</body>
+</html>
