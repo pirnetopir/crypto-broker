@@ -1,6 +1,10 @@
 import os, logging
 from fastapi import FastAPI
 
+from fastapi import Request
+from fastapi.templating import Jinja2Templates
+
+
 # dôležité: importovať modul, NIE premennú
 from . import scheduler as sched
 from .services.notifier import send_email
@@ -8,6 +12,8 @@ from .services.coingecko import ping as cg_ping_api
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="crypto-broker")
+
+templates = Jinja2Templates(directory="templates")
 
 @app.on_event("startup")
 def _start_scheduler():
@@ -19,6 +25,16 @@ def _start_scheduler():
 @app.get("/")
 def root():
     return {"status": "ok", "app": "crypto-broker", "scheduler": "running"}
+
+@app.get("/dashboard")
+def dashboard(request: Request):
+    # tieto hodnoty len na zobrazenie v hlavičke
+    preselect = os.getenv("PRESELECT", "80")
+    tz = os.getenv("TZ", "Europe/Bratislava")
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {"request": request, "preselect": preselect, "tz": tz},
+    )
 
 @app.get("/signal")
 def get_signal():
