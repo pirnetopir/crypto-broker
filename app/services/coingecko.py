@@ -18,7 +18,7 @@ async def _get_json(url: str, tries: int = 7, base_sleep: float = 2.5):
     last_exc = None
     for attempt in range(tries):
         try:
-            async with httpx.AsyncClient(timeout=60, headers=_HEA DERS) as c:
+            async with httpx.AsyncClient(timeout=60, headers=_HEADERS) as c:
                 r = await c.get(url)
                 if r.status_code == 429 or 500 <= r.status_code < 600:
                     raise httpx.HTTPStatusError(
