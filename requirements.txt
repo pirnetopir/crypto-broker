@@ -6,3 +6,4 @@ tzlocal
 pytz
 numpy
 pandas
+jinja2
