@@ -1,20 +1,30 @@
-import httpx, asyncio, time, random
+import httpx, asyncio, time, random, os
 from typing import List, Dict
 
+PLAN = os.getenv("COINGECKO_PLAN", "public").lower().strip()
+KEY  = os.getenv("COINGECKO_KEY", "").strip()
+
 BASE = "https://api.coingecko.com/api/v3"
+if PLAN == "pro":
+    BASE = "https://pro-api.coingecko.com/api/v3"
+
+_HEADERS = {
+    "User-Agent": "crypto-broker/1.0 (contact: email in EMAIL_TO env)",
+    "Accept": "application/json",
+}
+
+# demo/pro kľúč do hlavičky – podľa oficiálneho návodu
+# demo: x-cg-demo-api-key, pro: x-cg-pro-api-key
+if KEY:
+    if PLAN == "demo":
+        _HEADERS["x-cg-demo-api-key"] = KEY
+    elif PLAN == "pro":
+        _HEADERS["x-cg-pro-api-key"] = KEY
 
 # jednoduchá in-memory cache pre top200
 _markets_cache = {"ts": 0.0, "data": None}
 
-_HEADERS = {
-    "User-Agent": "crypto-broker/1.0 (contact: EMAIL_TO env)",
-    "Accept": "application/json",
-}
-
 async def _get_json(url: str, tries: int = 7, base_sleep: float = 2.5):
-    """
-    GET s exponenciálnym backoffom. Retry pri 429 a 5xx.
-    """
     last_exc = None
     for attempt in range(tries):
         try:
@@ -40,16 +50,11 @@ async def _get_markets(per_page: int, page: int = 1, vs: str = "usd"):
     return await _get_json(url)
 
 async def get_markets_top200_slow(vs: str = "usd") -> List[Dict]:
-    """
-    Skúsi 1×200; ak 429, skúsi 2×100; ak 429, 4×50 (s pauzami).
-    Výsledok zloží a deduplikuje podľa 'id'.
-    """
     # 1) 200 na 1 request
     try:
         return await _get_markets(200, 1, vs)
     except Exception:
-        pass  # prejdeme na 2×100
-
+        pass
     # 2) 2×100
     out = []
     ok = True
@@ -61,42 +66,31 @@ async def get_markets_top200_slow(vs: str = "usd") -> List[Dict]:
             ok = False
             break
     if ok and out:
-        # dedupe
-        seen = set()
-        uniq = []
+        seen, uniq = set(), []
         for x in out:
-            if x.get("id") not in seen:
-                seen.add(x.get("id"))
-                uniq.append(x)
+            i = x.get("id")
+            if i not in seen:
+                seen.add(i); uniq.append(x)
         return uniq
-
     # 3) 4×50
     out = []
     for p in (1, 2, 3, 4):
         try:
             out.extend(await _get_markets(50, p, vs))
         except Exception:
-            # ak niektorý padne, proste pokračuj
             pass
         await asyncio.sleep(2.0)
-    # dedupe & truncate na 200
-    seen = set()
-    uniq = []
+    seen, uniq = set(), []
     for x in out:
-        if x.get("id") not in seen:
-            seen.add(x.get("id"))
-            uniq.append(x)
-        if len(uniq) >= 200:
-            break
+        i = x.get("id")
+        if i not in seen:
+            seen.add(i); uniq.append(x)
+        if len(uniq) >= 200: break
     if not uniq:
         raise httpx.HTTPStatusError("status 429", request=None, response=None)
     return uniq
 
 async def get_markets_top200_cached(vs: str = "usd", ttl_minutes: int = 720) -> List[Dict]:
-    """
-    Vráti top200 z cache; ak je staršia než ttl, stiahne znova.
-    Pri chybe použije starú cache, ak existuje.
-    """
     now = time.time()
     if _markets_cache["data"] and now - _markets_cache["ts"] < ttl_minutes * 60:
         return _markets_cache["data"]
@@ -106,10 +100,7 @@ async def get_markets_top200_cached(vs: str = "usd", ttl_minutes: int = 720) -> 
         _markets_cache["ts"] = now
         return data
     except Exception:
-        # fallback: ak už cache bola, použijeme ju; inak prázdny zoznam
-        if _markets_cache["data"]:
-            return _markets_cache["data"]
-        return []
+        return _markets_cache["data"] or []
 
 async def get_market_chart(coin_id: str, days: int = 10, interval: str = "hourly") -> Dict:
     url = f"{BASE}/coins/{coin_id}/market_chart?vs_currency=usd&days={days}&interval={interval}"
@@ -118,9 +109,15 @@ async def get_market_chart(coin_id: str, days: int = 10, interval: str = "hourly
 async def fetch_many_hourly(
     ids: List[str],
     days: int = 10,
-    concurrency: int = 2,
-    sleep_between: float = 1.5,
+    concurrency: int | None = None,
+    sleep_between: float | None = None,
 ) -> Dict[str, Dict]:
+    # ber z ENV (bezpecne pre Demo 30rpm)
+    if concurrency is None:
+        concurrency = int(os.getenv("CG_CONCURRENCY", "1"))
+    if sleep_between is None:
+        sleep_between = float(os.getenv("CG_SLEEP", "2.2"))
+
     sem = asyncio.Semaphore(concurrency)
     results: Dict[str, Dict] = {}
 
