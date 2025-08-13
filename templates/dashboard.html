@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 text-slate-800">
-  <div class="max-w-5xl mx-auto p-6">
+  <div class="max-w-6xl mx-auto p-6">
     <header class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-bold">Krypto Broker – Dashboard</h1>
       <div class="flex gap-2">
@@ -21,14 +21,17 @@
       <div class="mt-1 text-xs text-slate-500">
         Plán: <span class="font-mono">07:30</span>, <span class="font-mono">13:00</span>, <span class="font-mono">22:00</span> ({{ tz }})
         · PRESELECT: <span class="font-mono">{{ preselect }}</span>
+        · PICK_TOP: <span class="font-mono">10</span>
       </div>
     </section>
 
+    <!-- Keď ešte nie je signál -->
     <section id="emptyBox" class="hidden p-6 border rounded-xl bg-white">
       <p class="mb-2">Zatiaľ nie je uložený žiadny signál.</p>
       <p class="text-sm text-slate-600">Klikni <b>Run now</b> alebo počkaj na najbližší plánovaný čas.</p>
     </section>
 
+    <!-- Posledný signál -->
     <section id="signalBox" class="hidden">
       <div class="p-6 border rounded-xl bg-white">
         <div class="flex items-center justify-between mb-4">
@@ -53,6 +56,7 @@
                 <th class="py-2">Váha</th>
                 <th class="py-2">24h</th>
                 <th class="py-2">ATR%</th>
+                <th class="py-2">Akcia</th>
               </tr>
             </thead>
             <tbody id="picksBody"></tbody>
@@ -60,6 +64,37 @@
         </div>
 
         <div id="note" class="mt-3 text-xs text-slate-500"></div>
+      </div>
+    </section>
+
+    <!-- Portfólio -->
+    <section id="portfolioBox" class="mt-6 p-6 border rounded-xl bg-white hidden">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Portfólio</h2>
+        <div class="flex gap-2">
+          <button id="reloadPfBtn" class="px-3 py-1 rounded-xl bg-white border">Obnoviť</button>
+        </div>
+      </div>
+      <div id="pfSummary" class="text-sm text-slate-600 mb-3">—</div>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-600 border-b">
+              <th class="py-2">ID</th>
+              <th class="py-2">Symbol</th>
+              <th class="py-2">Názov</th>
+              <th class="py-2">Investované (€)</th>
+              <th class="py-2">Kúpené</th>
+              <th class="py-2">Predané (€)</th>
+              <th class="py-2">Ukončené</th>
+              <th class="py-2">PnL (€)</th>
+              <th class="py-2">ROI %</th>
+              <th class="py-2">Akcia</th>
+            </tr>
+          </thead>
+          <tbody id="pfBody"></tbody>
+        </table>
       </div>
     </section>
   </div>
@@ -73,6 +108,11 @@
     const regimeBadge = document.getElementById('regimeBadge');
     const noteEl = document.getElementById('note');
 
+    const pfBox = document.getElementById('portfolioBox');
+    const pfBody = document.getElementById('pfBody');
+    const pfSummary = document.getElementById('pfSummary');
+
+    // Načíta posledný signál a vykreslí TOP N (PICK_TOP)
     async function loadSignal() {
       statusEl.textContent = 'Načítavam…';
       try {
@@ -108,17 +148,96 @@
             <td class="py-2 font-mono">${Number(p.weight || 0).toFixed(3)}</td>
             <td class="py-2 font-mono">${(Number(p.mom_24h) * 100).toFixed(2)}%</td>
             <td class="py-2 font-mono">${(Number(p.atr_pct) * 100).toFixed(2)}%</td>
+            <td class="py-2">
+              <button
+                class="px-3 py-1 rounded bg-emerald-600 text-white"
+                data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
+                onclick="invest(this)">Investovať</button>
+            </td>
           `;
           picksBody.appendChild(tr);
         });
 
         noteEl.textContent = data.note || '';
       } catch (e) {
+        console.error(e);
         statusEl.textContent = 'Chyba pri načítaní.';
       }
     }
 
-    document.getElementById('refreshBtn').addEventListener('click', loadSignal);
+    // Vytvorí obchod podľa vstupu používateľa
+    async function invest(btn) {
+      const coin_id = btn.getAttribute('data-id');
+      const symbol = btn.getAttribute('data-symbol');
+      const name = btn.getAttribute('data-name');
+      const amt = prompt(`Koľko chceš investovať do ${symbol}? (EUR)`, "100");
+      if (!amt) return;
+      const payload = { coin_id, symbol, name, invested_eur: Number(amt) };
+      await fetch('/api/trades', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      loadPortfolio();
+    }
+
+    // Uzatvorí obchod (zadá sa predajná cena)
+    async function closeTrade(id) {
+      const amt = prompt("Za koľko EUR si predal?", "120");
+      if (!amt) return;
+      await fetch(`/api/trades/${id}/close`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ sold_eur: Number(amt) })
+      });
+      loadPortfolio();
+    }
+
+    // Načíta portfólio + sumár PnL
+    async function loadPortfolio() {
+      try {
+        const r = await fetch('/api/trades', { cache: 'no-store' });
+        const data = await r.json();
+        if (!data.ok) { pfBox.classList.add('hidden'); return; }
+        pfBox.classList.remove('hidden');
+
+        pfSummary.textContent =
+          `Otvorené: ${data.summary.open_trades} · Uzavreté: ${data.summary.closed_trades} · ` +
+          `Investované spolu: ${Number(data.summary.invested_total_eur).toFixed(2)} € · ` +
+          `Realizované PnL: ${Number(data.summary.realized_pnl_eur).toFixed(2)} €`;
+
+        pfBody.innerHTML = '';
+        (data.items || []).forEach(t => {
+          const tr = document.createElement('tr');
+          tr.className = 'border-b';
+          tr.innerHTML = `
+            <td class="py-2">${t.id}</td>
+            <td class="py-2 font-semibold">${t.symbol}</td>
+            <td class="py-2">${t.name}</td>
+            <td class="py-2 font-mono">${Number(t.invested_eur).toFixed(2)}</td>
+            <td class="py-2">${t.invested_at?.replace('T',' ').replace('Z','')}</td>
+            <td class="py-2 font-mono">${t.sold_eur !== null ? Number(t.sold_eur).toFixed(2) : '—'}</td>
+            <td class="py-2">${t.sold_at ? t.sold_at.replace('T',' ').replace('Z','') : '—'}</td>
+            <td class="py-2 font-mono">${t.pnl_eur === null ? '—' : Number(t.pnl_eur).toFixed(2)}</td>
+            <td class="py-2 font-mono">${t.roi_pct === null ? '—' : Number(t.roi_pct).toFixed(2)}</td>
+            <td class="py-2">
+              ${t.sold_eur === null
+                ? `<button class="px-3 py-1 rounded bg-amber-600 text-white" onclick="closeTrade(${t.id})">Ukončiť</button>`
+                : '<span class="text-slate-400">—</span>'}
+            </td>
+          `;
+          pfBody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Handlery
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      loadSignal(); loadPortfolio();
+    });
+    document.getElementById('reloadPfBtn').addEventListener('click', loadPortfolio);
     document.getElementById('runNowBtn').addEventListener('click', async () => {
       const btn = document.getElementById('runNowBtn');
       const old = btn.textContent;
@@ -126,16 +245,17 @@
       btn.disabled = true;
       try {
         await fetch('/run-now', { cache: 'no-store' });
-        // daj appke chvíľu na dokončenie
-        setTimeout(loadSignal, 4000);
+        // nechaj jobu chvíľu dobehnúť
+        setTimeout(() => { loadSignal(); loadPortfolio(); }, 4000);
       } finally {
         setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1500);
       }
     });
 
+    // Init
     loadSignal();
-    // auto-refresh každých 60 s
-    setInterval(loadSignal, 60000);
+    loadPortfolio();
+    setInterval(() => { loadSignal(); loadPortfolio(); }, 60000);
   </script>
 </body>
 </html>
