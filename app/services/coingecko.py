@@ -1,5 +1,6 @@
 import httpx, asyncio, time, random, os
 from typing import List, Dict
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
 PLAN = os.getenv("COINGECKO_PLAN", "public").lower().strip()
 KEY  = os.getenv("COINGECKO_KEY", "").strip()
@@ -9,27 +10,39 @@ if PLAN == "pro":
     BASE = "https://pro-api.coingecko.com/api/v3"
 
 _HEADERS = {
-    "User-Agent": "crypto-broker/1.0 (contact: email in EMAIL_TO env)",
+    "User-Agent": "crypto-broker/1.0",
     "Accept": "application/json",
 }
 
-# demo/pro kľúč do hlavičky – podľa oficiálneho návodu
-# demo: x-cg-demo-api-key, pro: x-cg-pro-api-key
+# Hlavičku ponecháme (pre istotu), ale kľúč pridáme aj do query:
 if KEY:
     if PLAN == "demo":
-        _HEADERS["x-cg-demo-api-key"] = KEY
+        _HEADERS["x-cg-demo-api-key"] = KEY  # dobrovoľné, dokumentácia odporúča aj query
     elif PLAN == "pro":
         _HEADERS["x-cg-pro-api-key"] = KEY
+
+def _with_key(url: str) -> str:
+    """Pridá x_cg_demo_api_key / x_cg_pro_api_key do query stringu."""
+    if not KEY:
+        return url
+    u = urlparse(url)
+    q = dict(parse_qsl(u.query))
+    if PLAN == "demo":
+        q["x_cg_demo_api_key"] = KEY
+    elif PLAN == "pro":
+        q["x_cg_pro_api_key"] = KEY
+    return urlunparse((u.scheme, u.netloc, u.path, u.params, urlencode(q), u.fragment))
 
 # jednoduchá in-memory cache pre top200
 _markets_cache = {"ts": 0.0, "data": None}
 
-async def _get_json(url: str, tries: int = 7, base_sleep: float = 2.5):
+async def _get_json(url: str, tries: int = 7, base_sleep: float = 2.0):
     last_exc = None
     for attempt in range(tries):
         try:
             async with httpx.AsyncClient(timeout=60, headers=_HEADERS) as c:
-                r = await c.get(url)
+                u = _with_key(url)
+                r = await c.get(u)
                 if r.status_code == 429 or 500 <= r.status_code < 600:
                     raise httpx.HTTPStatusError(
                         f"status {r.status_code}", request=r.request, response=r
@@ -50,18 +63,16 @@ async def _get_markets(per_page: int, page: int = 1, vs: str = "usd"):
     return await _get_json(url)
 
 async def get_markets_top200_slow(vs: str = "usd") -> List[Dict]:
-    # 1) 200 na 1 request
     try:
         return await _get_markets(200, 1, vs)
     except Exception:
         pass
-    # 2) 2×100
     out = []
     ok = True
     for p in (1, 2):
         try:
             out.extend(await _get_markets(100, p, vs))
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.2)
         except Exception:
             ok = False
             break
@@ -72,14 +83,13 @@ async def get_markets_top200_slow(vs: str = "usd") -> List[Dict]:
             if i not in seen:
                 seen.add(i); uniq.append(x)
         return uniq
-    # 3) 4×50
     out = []
     for p in (1, 2, 3, 4):
         try:
             out.extend(await _get_markets(50, p, vs))
         except Exception:
             pass
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(1.5)
     seen, uniq = set(), []
     for x in out:
         i = x.get("id")
@@ -112,7 +122,7 @@ async def fetch_many_hourly(
     concurrency: int | None = None,
     sleep_between: float | None = None,
 ) -> Dict[str, Dict]:
-    # ber z ENV (bezpecne pre Demo 30rpm)
+    # Demo plan: bezpečné defaults z ENV
     if concurrency is None:
         concurrency = int(os.getenv("CG_CONCURRENCY", "1"))
     if sleep_between is None:
@@ -134,4 +144,8 @@ async def fetch_many_hourly(
 
 async def get_btc_daily(days: int = 400) -> Dict:
     url = f"{BASE}/coins/bitcoin/market_chart?vs_currency=usd&days={days}&interval=daily"
+    return await _get_json(url)
+
+async def ping():
+    url = f"{BASE}/ping"
     return await _get_json(url)
