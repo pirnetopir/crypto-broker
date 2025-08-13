@@ -3,7 +3,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from .services.coingecko import get_markets_top200, fetch_many_hourly
+from .services.coingecko import get_markets_top200_cached, fetch_many_hourly
 from .services.indicators import atr_from_closes, pct_change, last_close
 from .services.regime import regime_flag
 from .services.scorer import compute_scores
@@ -32,7 +32,7 @@ async def job_30m():
     try:
         logging.info("job_30m start")
         # 1) načítaj top200 trh
-        markets = await get_markets_top200("usd")
+        markets = await get_markets_top200_cached("usd", ttl_minutes=720)  # 12 hodín cache
         # vyhoď stablecoiny
         STABLE_IDS = {"tether", "usd-coin", "dai", "usdd", "frax"}
         rows = []
