@@ -7,3 +7,6 @@ pytz
 numpy
 pandas
 jinja2
+sqlalchemy>=2.0
+psycopg[binary]
+pydantic>=2
