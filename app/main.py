@@ -93,9 +93,9 @@ async def run_wildcards():
     """
     global LAST_WILDCARDS
     try:
-        coinbase_only = os.getenv("COINBASE_ONLY", "0") == "1"
         markets = await get_markets_top200_cached("usd", ttl_minutes=10)
-        # voliteľne filtruj len tie so symbolom z Coinbase (ostatné časti appky to už riešia)
+        # mapy na rýchle doplnenie 24h volume (USD) podľa id
+        vol_by_id = {m.get("id"): float(m.get("total_volume") or 0.0) for m in markets if m.get("id")}
 
         # 1) kandidáti z RSS
         pool_n = _envi("WILDCARDS_POOL", 12)
@@ -104,7 +104,11 @@ async def run_wildcards():
             LAST_WILDCARDS = []
             return {"ok": True, "items": []}
 
-        # 2) metriky
+        # doplň 24h volume (FREE/LLM pravidlá to používajú)
+        for c in cands:
+            c["vol24"] = vol_by_id.get(c["id"], 0.0)
+
+        # 2) metriky z hodín (10 dní)
         ids = [c["id"] for c in cands]
         charts = await fetch_many_hourly(ids, days=10)
         enriched: List[Dict] = []
@@ -113,6 +117,10 @@ async def run_wildcards():
             row = _enrich_from_prices(c["id"], data.get("prices", []), seed=c)
             if row:
                 enriched.append(row)
+
+        if not enriched:
+            LAST_WILDCARDS = []
+            return {"ok": True, "items": []}
 
         # 3) AI hodnotenie
         regime = sched.LAST_SIGNAL.regime if sched.LAST_SIGNAL else "risk-on"
@@ -128,6 +136,7 @@ async def run_wildcards():
         logging.exception("wildcards error: %s", e)
         LAST_WILDCARDS = []
         return {"ok": False, "error": str(e)}
+
 
 @app.get("/wildcards")
 def wildcards():
