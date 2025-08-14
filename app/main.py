@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from fastapi import FastAPI, Request, Response
 from fastapi.templating import Jinja2Templates
@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 
 from . import scheduler as sched
 from .services.notifier import send_email
-from .services.coingecko import ping as cg_ping_api
+from .services.coingecko import ping as cg_ping_api, fetch_many_hourly, get_markets_top200_cached
+from .services.news import fetch_candidates_from_rss
+from .services.ai import evaluate_wildcards
 from .db import SessionLocal, init_db, Trade
 
 logging.basicConfig(level=logging.INFO)
@@ -19,10 +21,12 @@ templates = Jinja2Templates(directory="templates")
 def _envi(name: str, default: int) -> int:
     try: return int(os.getenv(name, str(default)))
     except: return int(default)
-
 def _envf(name: str, default: float) -> float:
     try: return float(os.getenv(name, str(default)))
     except: return float(default)
+
+# ---------- shared state ----------
+LAST_WILDCARDS: List[Dict] = []  # uložíme posledné AI žolíky
 
 @app.on_event("startup")
 def _start_scheduler():
@@ -53,6 +57,83 @@ async def run_now():
     await sched.job_morning_scan()
     return {"ok": True}
 
+# ---------- WILDCARDS (AI) ----------
+def _enrich_from_prices(cid: str, prices: List[List[float]], seed: Dict) -> Optional[Dict]:
+    from .services.indicators import pct_change, atr_from_closes, ema, rsi
+    closes = [p[1] for p in prices]
+    if len(closes) < 200:
+        return None
+    close = closes[-1]
+    mom_3h  = pct_change(close, closes[-4]) if len(closes) > 4 else 0.0
+    mom_24h = pct_change(close, closes[-24]) if len(closes) > 24 else 0.0
+    mom_7d  = pct_change(close, closes[-24*7]) if len(closes) > 24*7 else 0.0
+    atr = atr_from_closes(closes, period=14)
+    atr_pct = (atr[-1] / close) if close else 0.0
+    em50 = ema(closes, 50)[-1]
+    rsi14 = rsi(closes, 14)[-1]
+    z = dict(seed)
+    z.update({
+        "price": float(close),
+        "mom_3h": float(mom_3h),
+        "mom_24h": float(mom_24h),
+        "mom_7d": float(mom_7d),
+        "atr_pct": float(atr_pct),
+        "ema50": float(em50),
+        "rsi": float(rsi14),
+    })
+    return z
+
+@app.get("/run-wildcards")
+async def run_wildcards():
+    """
+    1) RSS -> kandidáti
+    2) dotiahnuť ceny -> metriky
+    3) AI hodnotenie (alebo free fallback)
+    4) vybrať WILDCARDS_COUNT schválených
+    """
+    global LAST_WILDCARDS
+    try:
+        coinbase_only = os.getenv("COINBASE_ONLY", "0") == "1"
+        markets = await get_markets_top200_cached("usd", ttl_minutes=10)
+        # voliteľne filtruj len tie so symbolom z Coinbase (ostatné časti appky to už riešia)
+
+        # 1) kandidáti z RSS
+        pool_n = _envi("WILDCARDS_POOL", 12)
+        cands = fetch_candidates_from_rss(markets, hours_back=36, max_candidates=pool_n)
+        if not cands:
+            LAST_WILDCARDS = []
+            return {"ok": True, "items": []}
+
+        # 2) metriky
+        ids = [c["id"] for c in cands]
+        charts = await fetch_many_hourly(ids, days=10)
+        enriched: List[Dict] = []
+        for c in cands:
+            data = charts.get(c["id"], {})
+            row = _enrich_from_prices(c["id"], data.get("prices", []), seed=c)
+            if row:
+                enriched.append(row)
+
+        # 3) AI hodnotenie
+        regime = sched.LAST_SIGNAL.regime if sched.LAST_SIGNAL else "risk-on"
+        rated = evaluate_wildcards(enriched, regime=regime)
+
+        # 4) schválené + finálny výber
+        approved = [x for x in rated if x.get("ai_approve")]
+        approved.sort(key=lambda x: (x.get("news_score", 0.0), x.get("mom_7d", 0.0)), reverse=True)
+        k = _envi("WILDCARDS_COUNT", 2)
+        LAST_WILDCARDS = approved[:k]
+        return {"ok": True, "items": LAST_WILDCARDS}
+    except Exception as e:
+        logging.exception("wildcards error: %s", e)
+        LAST_WILDCARDS = []
+        return {"ok": False, "error": str(e)}
+
+@app.get("/wildcards")
+def wildcards():
+    return {"ok": True, "items": LAST_WILDCARDS}
+
+# ---------- misc ----------
 @app.get("/test-email")
 def test_email():
     try:
@@ -72,7 +153,7 @@ def dashboard(request: Request):
     tz = os.getenv("TZ", "Europe/Bratislava")
     return templates.TemplateResponse("dashboard.html", {"request": request, "preselect": preselect, "tz": tz})
 
-# -------- Trades API --------
+# -------- Trades API (nezmenené + batch/CSV/unrealized) --------
 class TradeIn(BaseModel):
     coin_id: str
     symbol: str
@@ -111,7 +192,6 @@ def _to_dict_trade(t: Trade):
         "tp1_usd": t.tp1_usd,
         "tp2_usd": t.tp2_usd,
     }
-    # realized
     if t.sold_eur is not None:
         pnl = t.sold_eur - t.invested_eur
         roi = (t.sold_eur / t.invested_eur - 1.0) * 100.0 if t.invested_eur > 0 else None
@@ -119,7 +199,6 @@ def _to_dict_trade(t: Trade):
         pnl = None; roi = None
     d["pnl_eur"] = pnl; d["roi_pct"] = roi
 
-    # unrealized (ak otvorená)
     if t.sold_eur is None and t.units and t.last_price_usd and t.fx_eurusd:
         curr_eur = (t.units * t.last_price_usd) / t.fx_eurusd
         upnl = curr_eur - t.invested_eur
@@ -139,12 +218,9 @@ def _risk_checks(db: Session, add_amount_eur: float) -> Optional[str]:
     open_trades = db.query(Trade).filter(Trade.sold_eur.is_(None)).all()
     if len(open_trades) >= max_open:
         return f"Dosiahnutý limit otvorených pozícií ({max_open})."
-
     invested_open = sum(t.invested_eur for t in open_trades)
     if invested_open + add_amount_eur > total_cap:
         return f"Investícia presahuje kapitál ({total_cap} EUR)."
-
-    # per-coin check v create_trade (lebo nevieme symbol tu)
     return None
 
 @app.post("/api/trades")
@@ -155,7 +231,6 @@ def create_trade(body: TradeIn):
         if err: return {"ok": False, "error": err}
 
         FX = _envf("FX_EURUSD", 1.10)
-        # nájdi posledný pick kvôli ATR-odhadom, ak nemáme SL/TP v tele
         atr_pct = None
         if sched.LAST_SIGNAL:
             for p in sched.LAST_SIGNAL.picks:
@@ -171,34 +246,25 @@ def create_trade(body: TradeIn):
             buy_price_usd=float(body.buy_price_usd) if body.buy_price_usd is not None else None,
             fx_eurusd=FX,
         )
-        # units & entry EUR
         if t.buy_price_usd:
             t.entry_price_eur = t.buy_price_usd / FX
             t.units = (t.invested_eur * FX) / t.buy_price_usd
             t.high_water_usd = t.buy_price_usd
             t.last_price_usd = t.buy_price_usd
 
-        # SL/TP návrhy (ak chýbajú)
         slm = _envf("ATR_SL_MULT", 1.5)
         tp1m = _envf("ATR_TP1_MULT", 2.0)
         tp2m = _envf("ATR_TP2_MULT", 3.0)
         if t.buy_price_usd and atr_pct:
-            if body.sl_usd is None:
-                t.sl_usd = t.buy_price_usd * (1.0 - slm * atr_pct)
-            if body.tp1_usd is None:
-                t.tp1_usd = t.buy_price_usd * (1.0 + tp1m * atr_pct)
-            if body.tp2_usd is None:
-                t.tp2_usd = t.buy_price_usd * (1.0 + tp2m * atr_pct)
+            if body.sl_usd is None: t.sl_usd = t.buy_price_usd * (1.0 - slm * atr_pct)
+            if body.tp1_usd is None: t.tp1_usd = t.buy_price_usd * (1.0 + tp1m * atr_pct)
+            if body.tp2_usd is None: t.tp2_usd = t.buy_price_usd * (1.0 + tp2m * atr_pct)
         else:
-            t.sl_usd = body.sl_usd
-            t.tp1_usd = body.tp1_usd
-            t.tp2_usd = body.tp2_usd
+            t.sl_usd = body.sl_usd; t.tp1_usd = body.tp1_usd; t.tp2_usd = body.tp2_usd
 
-        # per-coin limit
-        if t.invested_eur and t.entry_price_eur:
-            per_coin_limit = _envf("PER_COIN_MAX_PCT", 0.35) * _envf("TOTAL_CAPITAL_EUR", 1000.0)
-            if t.invested_eur > per_coin_limit:
-                return {"ok": False, "error": f"Max na coin je {per_coin_limit:.2f} € (PER_COIN_MAX_PCT)."}
+        per_coin_limit = _envf("PER_COIN_MAX_PCT", 0.35) * _envf("TOTAL_CAPITAL_EUR", 1000.0)
+        if t.invested_eur > per_coin_limit:
+            return {"ok": False, "error": f"Max na coin je {per_coin_limit:.2f} € (PER_COIN_MAX_PCT)."}
 
         db.add(t); db.commit(); db.refresh(t)
         return {"ok": True, "id": t.id, "trade": _to_dict_trade(t)}
@@ -212,16 +278,13 @@ def batch_trades(body: BatchInvestIn):
         total = sum(item.invested_eur for item in body.items)
         err = _risk_checks(db, total)
         if err: return {"ok": False, "error": err}
-
         res = []
         for item in body.items:
-            # per-coin limit
             per_coin_limit = _envf("PER_COIN_MAX_PCT", 0.35) * _envf("TOTAL_CAPITAL_EUR", 1000.0)
             if item.invested_eur > per_coin_limit:
                 return {"ok": False, "error": f"{item.symbol}: max na coin {per_coin_limit:.2f} € (PER_COIN_MAX_PCT)."}
-            r = create_trade(item)  # použijeme rovnakú logiku
-            if not r.get("ok"):
-                return r
+            r = create_trade(item)
+            if not r.get("ok"): return r
             res.append(r["trade"])
         return {"ok": True, "items": res}
     finally:
