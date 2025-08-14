@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import feedparser
 import re
 
-# Verejné RSS (bez kľúčov)
+# Viac RSS zdrojov (bez kľúčov)
 FEEDS = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://cointelegraph.com/rss",
@@ -13,9 +13,15 @@ FEEDS = [
     "https://www.binance.com/en/blog/feed",
     "https://okx.com/learn/feeds/rss",
     "https://medium.com/feed/tag/crypto",
+    # agregátory / novinky
+    "https://cryptonews.com/news/feed",          # CryptoNews
+    "https://cryptopotato.com/feed/",            # CryptoPotato
+    "https://cryptoslate.com/feed/",             # CryptoSlate
+    "https://www.theblock.co/rss",               # The Block
 ]
 
 _word = re.compile(r"[A-Za-z0-9\-_.]+")
+_cashtag = re.compile(r"\$[A-Za-z]{2,10}")  # napr. $SOL, $BTC
 
 def _now_ts() -> float:
     return datetime.now(timezone.utc).timestamp()
@@ -27,17 +33,16 @@ def _text_of(entry) -> str:
     parts = []
     if getattr(entry, "title", None): parts.append(entry.title)
     if getattr(entry, "summary", None): parts.append(entry.summary)
-    return " ".join(parts).lower()
+    return " ".join(parts)
 
 def _published(entry) -> float:
-    # feedparser normalizuje published_parsed
     try:
         return time.mktime(entry.published_parsed)
     except Exception:
         return _now_ts()
 
-def _tokenize(s: str) -> List[str]:
-    return [w.lower() for w in _word.findall(s)]
+def _tokenize_lower(s: str) -> List[str]:
+    return [w.lower() for w in _word.findall(s.lower())]
 
 def fetch_candidates_from_rss(
     markets: List[Dict],
@@ -46,22 +51,21 @@ def fetch_candidates_from_rss(
 ) -> List[Dict]:
     """
     markets: výstup z CoinGecko /coins/markets (TOP200), slúži na mapovanie názvov/symbolov.
-    Výsledok: zoznam kandidátov: {id, symbol, name, news_hits, news_score}
+    Výstup: [{id, symbol, name, news_hits, news_score}]
     """
     # mapy na rýchle párovanie
     by_symbol: Dict[str, Tuple[str, str]] = {}   # SYMBOL -> (id, name)
-    by_name: Dict[str, Tuple[str, str]] = {}     # "solana" -> (id, name)
+    by_name: Dict[str, Tuple[str, str]] = {}     # "solana" -> (id, "Solana")
     for m in markets:
         cid = m.get("id")
-        symbol = (m.get("symbol") or "").upper()
-        name = (m.get("name") or "").lower()
-        if cid and symbol:
-            by_symbol[symbol] = (cid, m.get("name") or symbol)
-        if cid and name:
-            by_name[name] = (cid, m.get("name") or symbol)
+        sym = (m.get("symbol") or "").upper()
+        name = (m.get("name") or "").strip()
+        if not cid or not sym or not name:
+            continue
+        by_symbol[sym] = (cid, name)
+        by_name[name.lower()] = (cid, name)
 
-    # agregácia zásahov
-    hits: Dict[str, Dict] = {}  # id -> {id, symbol, name, news_hits, news_score}
+    hits: Dict[str, Dict] = {}  # id -> agg
     cutoff_h = float(hours_back)
 
     for url in FEEDS:
@@ -72,32 +76,43 @@ def fetch_candidates_from_rss(
                 age_h = _age_hours(ts)
                 if age_h > cutoff_h:
                     continue
-                txt = _text_of(e)
-                toks = set(_tokenize(txt))
 
-                # silnejšie overenie na názvy a symboly
-                matched: List[Tuple[str, str, str]] = []  # (id, symbol, name)
-                # podľa symbolu (musí byť celé slovo v UPPER v titulku)
+                text = _text_of(e)
+                toks = set(_tokenize_lower(text))
+                tags = {t[1:].upper() for t in _cashtag.findall(text)}  # {$SOL, $BTC} -> {"SOL", "BTC"}
+
+                matched: List[Tuple[str, str, str]] = []
+
+                # 1) match cashtagov
+                for sym in tags:
+                    if sym in by_symbol:
+                        cid, nm = by_symbol[sym]
+                        matched.append((cid, sym, nm))
+
+                # 2) match podľa symbolu ako celého slova (lowercase v toks)
                 for sym, (cid, nm) in by_symbol.items():
                     if sym.lower() in toks:
                         matched.append((cid, sym, nm))
-                # podľa názvu (celé slovo, dĺžka>3 aby nechytilo "near" bežne)
-                for nm_txt, (cid, nm) in by_name.items():
-                    if len(nm_txt) > 3 and nm_txt in toks:
-                        matched.append((cid, by_symbol.get(nm.upper(), (None, ""))[0] or (nm[:6]).upper(), nm))
 
-                # skóre: čerstvosť (exponenciálne), 1.0 pre najnovšie; + menší bonus za zdroj
+                # 3) match podľa mena (celé slovo; dĺžka > 3 kvôli bežným slovám)
+                for nm_key, (cid, nm) in by_name.items():
+                    if len(nm_key) > 3 and nm_key in toks:
+                        matched.append((cid, by_symbol.get(nm.upper(), (sym,))[0] if nm.upper() in by_symbol else nm[:6].upper(), nm))
+
+                # skóre: čerstvosť (exponenciálne), bonus za priamy cashtag
                 freshness = math.exp(-age_h / 12.0)  # ~ polčas 8–12h
                 base = 1.0 * freshness
                 for cid, sym, nm in matched:
                     if cid not in hits:
                         hits[cid] = {"id": cid, "symbol": sym, "name": nm, "news_hits": 0, "news_score": 0.0}
                     hits[cid]["news_hits"] += 1
-                    hits[cid]["news_score"] += base
+                    # +0.5 bonus ak bol cashtag (silnejšia relevancia)
+                    bonus = 0.5 if sym in tags else 0.0
+                    hits[cid]["news_score"] += base + bonus
         except Exception:
+            # RSS niekedy zlyhá — ticho ignorujeme a ideme ďalej
             continue
 
-    # prenes len coiny s aspoň 1 zásahom
     out = [v for v in hits.values() if v["news_hits"] >= 1]
     out.sort(key=lambda x: (x["news_score"], x["news_hits"]), reverse=True)
     return out[:max_candidates]
