@@ -12,6 +12,7 @@ from .services.notifier import send_email
 from .services.coingecko import ping as cg_ping_api, fetch_many_hourly, get_markets_top200_cached
 from .services.news import fetch_candidates_from_rss
 from .services.ai import evaluate_wildcards
+from .services.dips import pick_dips   # <-- NOVÉ
 from .db import SessionLocal, init_db, Trade
 
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +27,8 @@ def _envf(name: str, default: float) -> float:
     except: return float(default)
 
 # ---------- shared state ----------
-LAST_WILDCARDS: List[Dict] = []  # uložíme posledné AI žolíky
+LAST_WILDCARDS: List[Dict] = []
+LAST_DIPS: List[Dict] = []  # <-- NOVÉ
 
 @app.on_event("startup")
 def _start_scheduler():
@@ -85,30 +87,20 @@ def _enrich_from_prices(cid: str, prices: List[List[float]], seed: Dict) -> Opti
 
 @app.get("/run-wildcards")
 async def run_wildcards():
-    """
-    1) RSS -> kandidáti
-    2) dotiahnuť ceny -> metriky
-    3) AI hodnotenie (alebo free fallback)
-    4) vybrať WILDCARDS_COUNT schválených
-    """
     global LAST_WILDCARDS
     try:
         markets = await get_markets_top200_cached("usd", ttl_minutes=10)
-        # mapy na rýchle doplnenie 24h volume (USD) podľa id
         vol_by_id = {m.get("id"): float(m.get("total_volume") or 0.0) for m in markets if m.get("id")}
 
-        # 1) kandidáti z RSS
         pool_n = _envi("WILDCARDS_POOL", 12)
         cands = fetch_candidates_from_rss(markets, hours_back=36, max_candidates=pool_n)
         if not cands:
             LAST_WILDCARDS = []
             return {"ok": True, "items": []}
 
-        # doplň 24h volume (FREE/LLM pravidlá to používajú)
         for c in cands:
             c["vol24"] = vol_by_id.get(c["id"], 0.0)
 
-        # 2) metriky z hodín (10 dní)
         ids = [c["id"] for c in cands]
         charts = await fetch_many_hourly(ids, days=10)
         enriched: List[Dict] = []
@@ -122,11 +114,9 @@ async def run_wildcards():
             LAST_WILDCARDS = []
             return {"ok": True, "items": []}
 
-        # 3) AI hodnotenie
         regime = sched.LAST_SIGNAL.regime if sched.LAST_SIGNAL else "risk-on"
         rated = evaluate_wildcards(enriched, regime=regime)
 
-        # 4) schválené + finálny výber
         approved = [x for x in rated if x.get("ai_approve")]
         approved.sort(key=lambda x: (x.get("news_score", 0.0), x.get("mom_7d", 0.0)), reverse=True)
         k = _envi("WILDCARDS_COUNT", 2)
@@ -137,10 +127,54 @@ async def run_wildcards():
         LAST_WILDCARDS = []
         return {"ok": False, "error": str(e)}
 
-
 @app.get("/wildcards")
 def wildcards():
     return {"ok": True, "items": LAST_WILDCARDS}
+
+# ---------- DIPS (nové) ----------
+@app.get("/run-dips")
+async def run_dips():
+    """
+    1) markets: TOP200 + 24h % zmena a vol24
+    2) vyber ~40 najväčších 24h prepadov
+    3) grafy (10 dní hourly) -> metriky
+    4) filtre a scoring -> top K
+    """
+    global LAST_DIPS
+    try:
+        markets = await get_markets_top200_cached("usd", ttl_minutes=10)
+        # kandidáti: sort podľa 24h zmeny (už v markets)
+        ids_sorted = []
+        for m in markets:
+            cid = m.get("id")
+            if not cid:
+                continue
+            chg = float(m.get("price_change_percentage_24h_in_currency") or 0.0)
+            ids_sorted.append((chg, cid))
+        ids_sorted.sort(key=lambda x: x[0])  # najväčší prepad navrchu
+        ids_pick = [cid for _, cid in ids_sorted[:40]]
+
+        charts = await fetch_many_hourly(ids_pick, days=10)
+
+        dips = pick_dips(
+            markets=markets,
+            charts=charts,
+            count=_envi("DIPS_COUNT", 2),
+            min_7d_drop=float(os.getenv("DIPS_MIN_7D", "-0.35")),
+            max_atr_pct=float(os.getenv("DIPS_MAX_ATR", "0.20")),
+            min_vol24=float(os.getenv("DIPS_MIN_VOL", "5000000")),
+        )
+
+        LAST_DIPS = dips
+        return {"ok": True, "items": dips}
+    except Exception as e:
+        logging.exception("dips error: %s", e)
+        LAST_DIPS = []
+        return {"ok": False, "error": str(e)}
+
+@app.get("/dips")
+def get_dips():
+    return {"ok": True, "items": LAST_DIPS}
 
 # ---------- misc ----------
 @app.get("/test-email")
@@ -162,7 +196,7 @@ def dashboard(request: Request):
     tz = os.getenv("TZ", "Europe/Bratislava")
     return templates.TemplateResponse("dashboard.html", {"request": request, "preselect": preselect, "tz": tz})
 
-# -------- Trades API (nezmenené + batch/CSV/unrealized) --------
+# -------- Trades API (nezmenené) --------
 class TradeIn(BaseModel):
     coin_id: str
     symbol: str
@@ -179,6 +213,8 @@ class TradeCloseIn(BaseModel):
 
 class BatchInvestIn(BaseModel):
     items: List[TradeIn]
+
+from .db import Trade  # ensure type is imported (already above)
 
 def _to_dict_trade(t: Trade):
     d = {
@@ -221,9 +257,7 @@ def _to_dict_trade(t: Trade):
 
 def _risk_checks(db: Session, add_amount_eur: float) -> Optional[str]:
     total_cap = _envf("TOTAL_CAPITAL_EUR", 1000.0)
-    per_coin_max = _envf("PER_COIN_MAX_PCT", 0.35)
     max_open = _envi("MAX_OPEN_POS", 5)
-
     open_trades = db.query(Trade).filter(Trade.sold_eur.is_(None)).all()
     if len(open_trades) >= max_open:
         return f"Dosiahnutý limit otvorených pozícií ({max_open})."
