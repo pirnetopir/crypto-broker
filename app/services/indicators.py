@@ -1,44 +1,70 @@
-import numpy as np
-import pandas as pd
+from typing import List
+import math
 
-def ema(arr, n: int):
-    arr = np.asarray(arr, dtype=float)
-    if len(arr) == 0:
-        return arr
-    k = 2/(n+1)
-    out = np.empty_like(arr)
-    out[0] = arr[0]
-    for i in range(1, len(arr)):
-        out[i] = arr[i]*k + out[i-1]*(1-k)
+def pct_change(curr: float, prev: float) -> float:
+    if prev == 0 or prev is None or curr is None:
+        return 0.0
+    return (curr / prev) - 1.0
+
+def ema(values: List[float], period: int) -> List[float]:
+    if not values or period <= 1:
+        return values[:] if values else []
+    k = 2.0 / (period + 1.0)
+    out: List[float] = []
+    ema_val = values[0]
+    out.append(ema_val)
+    for i in range(1, len(values)):
+        ema_val = values[i] * k + ema_val * (1.0 - k)
+        out.append(ema_val)
     return out
 
-def atr_from_closes(closes, period: int = 14):
-    """Simplifikovaná ATR z absolútnych zmien close (bez H/L)."""
-    closes = np.asarray(closes, dtype=float)
-    if len(closes) < 2:
-        return np.zeros_like(closes)
-    changes = np.abs(np.diff(closes))
-    tr = np.concatenate([[changes[0]], changes])
-    atr = np.empty_like(tr)
-    atr[0] = tr[0]
-    for i in range(1, len(tr)):
-        atr[i] = (atr[i-1]*(period-1) + tr[i]) / period
+def rsi(values: List[float], period: int = 14) -> List[float]:
+    if not values or len(values) < period + 1:
+        return [50.0 for _ in values]  # neutrál
+    gains = [0.0]; losses = [0.0]
+    for i in range(1, len(values)):
+        diff = values[i] - values[i-1]
+        gains.append(max(diff, 0.0))
+        losses.append(max(-diff, 0.0))
+    avg_gain = sum(gains[1:period+1]) / period
+    avg_loss = sum(losses[1:period+1]) / period
+    out = [50.0 for _ in range(period)]  # naplň začiatok
+    for i in range(period+1, len(values)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        if avg_loss == 0:
+            rs = math.inf
+        else:
+            rs = avg_gain / avg_loss
+        rsi_val = 100.0 - (100.0 / (1.0 + rs))
+        out.append(rsi_val)
+    # dorovnaj dĺžku (prvé hodnoty neutrál)
+    while len(out) < len(values):
+        out.insert(0, 50.0)
+    return out
+
+def atr_from_closes(values: List[float], period: int = 14) -> List[float]:
+    """
+    Proxy ATR iba z close-to-close (bez H/L). Stačí pre relatívny 'atr_pct'.
+    """
+    if not values:
+        return []
+    tr = [0.0]
+    for i in range(1, len(values)):
+        tr.append(abs(values[i] - values[i-1]))
+    # Wilder smoothing
+    atr: List[float] = []
+    if len(tr) < period:
+        atr = [sum(tr)/max(1,len(tr)) for _ in tr]
+    else:
+        first = sum(tr[1:period+1]) / period
+        atr = [first]
+        for i in range(period+1, len(tr)):
+            prev = atr[-1]
+            atr.append((prev*(period-1) + tr[i]) / period)
+        while len(atr) < len(values):
+            atr.insert(0, atr[0])
+    # zlaď dĺžku
+    while len(atr) < len(values):
+        atr.append(atr[-1])
     return atr
-
-def rank_pct(values):
-    """Percentilový rank v rozsahu 0..1 (vyššie=lepšie)."""
-    import numpy as np
-    v = np.asarray(values, dtype=float)
-    order = np.argsort(v)
-    ranks = np.empty_like(order, dtype=float)
-    ranks[order] = np.arange(len(v))
-    denom = max(1, len(v)-1)
-    return ranks / denom
-
-def pct_change(a, b):
-    if b == 0 or b is None:
-        return 0.0
-    return (a - b) / b
-
-def last_close(series):
-    return float(series[-1]) if len(series) else 0.0
