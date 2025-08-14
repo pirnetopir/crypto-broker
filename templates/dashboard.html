@@ -111,7 +111,7 @@
   </div>
 
   <script>
-    // ----------------- Pomocné -----------------
+    // -------- Pomocné --------
     const statusEl = document.getElementById('status');
     const emptyBox = document.getElementById('emptyBox');
     const signalBox = document.getElementById('signalBox');
@@ -127,197 +127,135 @@
     const budgetInput = document.getElementById('budgetInput');
     const saveBudgetBtn = document.getElementById('saveBudgetBtn');
     const resetBudgetBtn = document.getElementById('resetBudgetBtn');
-
     const BUDGET_KEY = 'kb_budget_eur';
 
-    function getBudget() {
-      const v = Number(localStorage.getItem(BUDGET_KEY) || '1000');
-      return isFinite(v) && v >= 0 ? v : 1000;
-    }
-    function setBudget(v) {
-      localStorage.setItem(BUDGET_KEY, String(v));
-    }
-    function roundToStep(v, step = 10) {
-      if (!isFinite(v)) return 0;
-      return Math.round(v / step) * step;
-    }
-    function fmtEUR(v) {
-      try {
-        return new Intl.NumberFormat('sk-SK', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v);
-      } catch { return `${Math.round(v)} €`; }
-    }
+    function getBudget(){const v=Number(localStorage.getItem(BUDGET_KEY)||'1000');return isFinite(v)&&v>=0?v:1000}
+    function setBudget(v){localStorage.setItem(BUDGET_KEY,String(v))}
+    function roundToStep(v,step=10){if(!isFinite(v))return 0;return Math.round(v/step)*step}
+    function fmtEUR(v){try{return new Intl.NumberFormat('sk-SK',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v)}catch{return `${Math.round(v)} €`}}
 
-    // ----------------- Signál -----------------
-    async function loadSignal() {
-      statusEl.textContent = 'Načítavam…';
-      try {
-        const r = await fetch('/signal', { cache: 'no-store' });
-        const data = await r.json();
-        if (!data.ready) {
-          emptyBox.classList.remove('hidden');
-          signalBox.classList.add('hidden');
-          statusEl.textContent = 'Žiadny signál – skús Run now alebo počkaj na ďalší beh.';
-          return;
-        }
-        emptyBox.classList.add('hidden');
-        signalBox.classList.remove('hidden');
-        statusEl.textContent = 'OK';
+    // -------- Signál --------
+    async function loadSignal(){
+      statusEl.textContent='Načítavam…';
+      try{
+        const r=await fetch('/signal',{cache:'no-store'});
+        const data=await r.json();
+        if(!data.ready){emptyBox.classList.remove('hidden');signalBox.classList.add('hidden');statusEl.textContent='Žiadny signál – skús Run now alebo počkaj na ďalší beh.';return}
+        emptyBox.classList.add('hidden');signalBox.classList.remove('hidden');statusEl.textContent='OK';
+        sigTime.textContent=data.created_at||'—';
+        const regime=(data.regime||'').toLowerCase();
+        regimeBadge.textContent=regime==='risk-on'?'RISK-ON':'RISK-OFF';
+        regimeBadge.className='px-3 py-1 rounded-full text-sm font-semibold '+(regime==='risk-on'?'bg-green-100 text-green-800':'bg-amber-100 text-amber-800');
 
-        sigTime.textContent = data.created_at || '—';
-        const regime = (data.regime || '').toLowerCase();
-        regimeBadge.textContent = regime === 'risk-on' ? 'RISK-ON' : 'RISK-OFF';
-        regimeBadge.className =
-          'px-3 py-1 rounded-full text-sm font-semibold ' +
-          (regime === 'risk-on' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800');
-
-        const budget = getBudget();
-        picksBody.innerHTML = '';
-        (data.picks || []).forEach((p, idx) => {
-          const w = Number(p.weight || 0);
-          const suggested = roundToStep(budget * w, 10); // návrh = rozpočet × váha
-          const tr = document.createElement('tr');
-          tr.className = 'border-b';
-          tr.innerHTML = `
-            <td class="py-2">${idx + 1}</td>
+        const budget=getBudget();
+        picksBody.innerHTML='';
+        (data.picks||[]).forEach((p,idx)=>{
+          const w=Number(p.weight||0);
+          const suggested=roundToStep(budget*w,10);
+          const tr=document.createElement('tr');tr.className='border-b';
+          tr.innerHTML=`
+            <td class="py-2">${idx+1}</td>
             <td class="py-2 font-semibold">${p.symbol}</td>
             <td class="py-2">${p.name}</td>
             <td class="py-2 font-mono">${Number(p.price).toFixed(6)}</td>
             <td class="py-2 font-mono">${Number(p.score).toFixed(3)}</td>
             <td class="py-2 font-mono">${w.toFixed(3)}</td>
-            <td class="py-2 font-mono">${(Number(p.mom_24h) * 100).toFixed(2)}%</td>
-            <td class="py-2 font-mono">${(Number(p.atr_pct) * 100).toFixed(2)}%</td>
+            <td class="py-2 font-mono">${(Number(p.mom_24h)*100).toFixed(2)}%</td>
+            <td class="py-2 font-mono">${(Number(p.atr_pct)*100).toFixed(2)}%</td>
             <td class="py-2">
               <button
                 class="px-3 py-1 rounded bg-emerald-600 text-white"
                 data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
-                data-weight="${w}" data-suggested="${suggested}"
+                data-price="${Number(p.price)}" data-suggested="${suggested}"
                 onclick="invest(this)">
-                Investovať ${suggested > 0 ? `(&asymp; ${fmtEUR(suggested)})` : ''}
+                Investovať ${suggested>0?`(&asymp; ${fmtEUR(Number(suggested))})`:''}
               </button>
-            </td>
-          `;
+            </td>`;
           picksBody.appendChild(tr);
         });
-
-        noteEl.textContent = data.note || '';
-      } catch (e) {
-        console.error(e);
-        statusEl.textContent = 'Chyba pri načítaní.';
-      }
+        noteEl.textContent=data.note||'';
+      }catch(e){console.error(e);statusEl.textContent='Chyba pri načítaní.'}
     }
 
-    // ----------------- Invest / Close -----------------
-    async function invest(btn) {
-      const coin_id = btn.getAttribute('data-id');
-      const symbol = btn.getAttribute('data-symbol');
-      const name = btn.getAttribute('data-name');
-      const suggested = Number(btn.getAttribute('data-suggested') || '0');
-      const def = suggested > 0 ? String(suggested) : "100";
-      const amt = prompt(`Koľko chceš investovať do ${symbol}? (EUR)\nNávrh: ${fmtEUR(Number(def))}`, def);
-      if (!amt) return;
-      const payload = { coin_id, symbol, name, invested_eur: Number(amt) };
-      await fetch('/api/trades', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
+    // -------- Invest / Close / Delete --------
+    async function invest(btn){
+      const coin_id=btn.getAttribute('data-id');
+      const symbol=btn.getAttribute('data-symbol');
+      const name=btn.getAttribute('data-name');
+      const price=Number(btn.getAttribute('data-price')||'0'); // USD
+      const suggested=Number(btn.getAttribute('data-suggested')||'0');
+      const def=suggested>0?String(suggested):"100";
+      const amt=prompt(`Koľko chceš investovať do ${symbol}? (EUR)\nNávrh: ${fmtEUR(Number(def))}`,def);
+      if(!amt)return;
+      const payload={coin_id,symbol,name,invested_eur:Number(amt),buy_price_usd:price};
+      await fetch('/api/trades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
       loadPortfolio();
     }
 
-    async function closeTrade(id) {
-      const amt = prompt("Za koľko EUR si predal?", "120");
-      if (!amt) return;
-      await fetch(`/api/trades/${id}/close`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ sold_eur: Number(amt) })
-      });
+    async function closeTrade(id){
+      const amt=prompt("Za koľko EUR si predal?","120");
+      if(!amt)return;
+      await fetch(`/api/trades/${id}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sold_eur:Number(amt)})});
       loadPortfolio();
     }
 
-    // ----------------- Portfólio -----------------
-    async function loadPortfolio() {
-      try {
-        const r = await fetch('/api/trades', { cache: 'no-store' });
-        const data = await r.json();
-        if (!data.ok) { pfBox.classList.add('hidden'); return; }
+    async function deleteTrade(id){
+      if(!confirm('Zrušiť tento otvorený obchod? Táto akcia je nevratná.')) return;
+      await fetch(`/api/trades/${id}`,{method:'DELETE'});
+      loadPortfolio();
+    }
+
+    // -------- Portfólio --------
+    async function loadPortfolio(){
+      try{
+        const r=await fetch('/api/trades',{cache:'no-store'});
+        const data=await r.json();
+        if(!data.ok){pfBox.classList.add('hidden');return}
         pfBox.classList.remove('hidden');
-
-        pfSummary.textContent =
-          `Otvorené: ${data.summary.open_trades} · Uzavreté: ${data.summary.closed_trades} · ` +
-          `Investované spolu: ${Number(data.summary.invested_total_eur).toFixed(2)} € · ` +
-          `Realizované PnL: ${Number(data.summary.realized_pnl_eur).toFixed(2)} €`;
-
-        pfBody.innerHTML = '';
-        (data.items || []).forEach(t => {
-          const tr = document.createElement('tr');
-          tr.className = 'border-b';
-          tr.innerHTML = `
+        pfSummary.textContent=`Otvorené: ${data.summary.open_trades} · Uzavreté: ${data.summary.closed_trades} · Investované spolu: ${Number(data.summary.invested_total_eur).toFixed(2)} € · Realizované PnL: ${Number(data.summary.realized_pnl_eur).toFixed(2)} €`;
+        pfBody.innerHTML='';
+        (data.items||[]).forEach(t=>{
+          const tr=document.createElement('tr');tr.className='border-b';
+          tr.innerHTML=`
             <td class="py-2">${t.id}</td>
             <td class="py-2 font-semibold">${t.symbol}</td>
             <td class="py-2">${t.name}</td>
             <td class="py-2 font-mono">${Number(t.invested_eur).toFixed(2)}</td>
             <td class="py-2">${t.invested_at?.replace('T',' ').replace('Z','')}</td>
-            <td class="py-2 font-mono">${t.sold_eur !== null ? Number(t.sold_eur).toFixed(2) : '—'}</td>
-            <td class="py-2">${t.sold_at ? t.sold_at.replace('T',' ').replace('Z','') : '—'}</td>
-            <td class="py-2 font-mono">${t.pnl_eur === null ? '—' : Number(t.pnl_eur).toFixed(2)}</td>
-            <td class="py-2 font-mono">${t.roi_pct === null ? '—' : Number(t.roi_pct).toFixed(2)}</td>
-            <td class="py-2">
-              ${t.sold_eur === null
-                ? `<button class="px-3 py-1 rounded bg-amber-600 text-white" onclick="closeTrade(${t.id})">Ukončiť</button>`
+            <td class="py-2 font-mono">${t.sold_eur!==null?Number(t.sold_eur).toFixed(2):'—'}</td>
+            <td class="py-2">${t.sold_at?t.sold_at.replace('T',' ').replace('Z',''):'—'}</td>
+            <td class="py-2 font-mono">${t.pnl_eur===null?'—':Number(t.pnl_eur).toFixed(2)}</td>
+            <td class="py-2 font-mono">${t.roi_pct===null?'—':Number(t.roi_pct).toFixed(2)}</td>
+            <td class="py-2 flex gap-2">
+              ${t.sold_eur===null
+                ? `<button class="px-3 py-1 rounded bg-amber-600 text-white" onclick="closeTrade(${t.id})">Ukončiť</button>
+                   <button class="px-3 py-1 rounded bg-rose-600 text-white" onclick="deleteTrade(${t.id})">❌ Zrušiť</button>`
                 : '<span class="text-slate-400">—</span>'}
-            </td>
-          `;
+            </td>`;
           pfBody.appendChild(tr);
         });
-      } catch (e) {
-        console.error(e);
-      }
+      }catch(e){console.error(e)}
     }
 
-    // ----------------- Ovládanie rozpočtu -----------------
-    function initBudgetControls() {
-      budgetInput.value = String(getBudget());
-      saveBudgetBtn.addEventListener('click', () => {
-        const v = Number(budgetInput.value || '0');
-        if (!isFinite(v) || v < 0) return alert('Zadaj kladné číslo.');
-        setBudget(v);
-        loadSignal(); // prepočíta návrhy
-      });
-      resetBudgetBtn.addEventListener('click', () => {
-        budgetInput.value = '1000';
-        setBudget(1000);
-        loadSignal();
-      });
-      budgetInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') saveBudgetBtn.click();
-      });
+    // -------- Ovládanie rozpočtu --------
+    function initBudgetControls(){
+      budgetInput.value=String(getBudget());
+      saveBudgetBtn.addEventListener('click',()=>{const v=Number(budgetInput.value||'0');if(!isFinite(v)||v<0)return alert('Zadaj kladné číslo.');setBudget(v);loadSignal()});
+      resetBudgetBtn.addEventListener('click',()=>{budgetInput.value='1000';setBudget(1000);loadSignal()});
+      budgetInput.addEventListener('keydown',(e)=>{if(e.key==='Enter')saveBudgetBtn.click()});
     }
 
-    // ----------------- Handlery -----------------
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-      loadSignal(); loadPortfolio();
-    });
-    document.getElementById('reloadPfBtn').addEventListener('click', loadPortfolio);
-    document.getElementById('runNowBtn').addEventListener('click', async () => {
-      const btn = document.getElementById('runNowBtn');
-      const old = btn.textContent;
-      btn.textContent = 'Bežím…';
-      btn.disabled = true;
-      try {
-        await fetch('/run-now', { cache: 'no-store' });
-        // nechaj jobu chvíľu dobehnúť
-        setTimeout(() => { loadSignal(); loadPortfolio(); }, 4000);
-      } finally {
-        setTimeout(() => { btn.textContent = old; btn.disabled = false; }, 1500);
-      }
+    // -------- Handlery --------
+    document.getElementById('refreshBtn').addEventListener('click',()=>{loadSignal();loadPortfolio()});
+    document.getElementById('reloadPfBtn').addEventListener('click',loadPortfolio);
+    document.getElementById('runNowBtn').addEventListener('click',async()=>{
+      const btn=document.getElementById('runNowBtn');const old=btn.textContent;btn.textContent='Bežím…';btn.disabled=true;
+      try{await fetch('/run-now',{cache:'no-store'});setTimeout(()=>{loadSignal();loadPortfolio()},4000)}
+      finally{setTimeout(()=>{btn.textContent=old;btn.disabled=false},1500)}
     });
 
-    // ----------------- Init -----------------
-    initBudgetControls();
-    loadSignal();
-    loadPortfolio();
-    setInterval(() => { loadSignal(); loadPortfolio(); }, 60000);
+    // -------- Init --------
+    initBudgetControls();loadSignal();loadPortfolio();setInterval(()=>{loadSignal();loadPortfolio()},60000);
   </script>
 </body>
 </html>
