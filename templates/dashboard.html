@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Krypto Broker – Dashboard</title>
-  <!-- minimal favicon, aby nebola 404 -->
   <link rel="icon" href="data:,">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -13,10 +12,11 @@
     <header class="mb-6">
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold">Krypto Broker – Dashboard</h1>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
           <a href="/api/trades.csv" class="px-4 py-2 rounded-xl bg-white border">Export CSV</a>
           <button id="wildBtn" class="px-4 py-2 rounded-xl bg-indigo-700 text-white">Žolíky AI – Run now</button>
-          <button id="runNowBtn" class="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-90">Run now</button>
+          <button id="dipBtn" class="px-4 py-2 rounded-xl bg-orange-700 text-white">Dip-Buy – Run now</button>
+          <button id="runNowBtn" class="px-4 py-2 rounded-xl bg-slate-900 text-white">Run now</button>
           <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-white border">Refresh</button>
         </div>
       </div>
@@ -39,13 +39,13 @@
       </div>
     </header>
 
-    <!-- Keď ešte nie je signál -->
+    <!-- Empty -->
     <section id="emptyBox" class="hidden p-6 border rounded-xl bg-white">
       <p class="mb-2">Zatiaľ nie je uložený žiadny signál.</p>
       <p class="text-sm text-slate-600">Klikni <b>Run now</b> alebo počkaj na najbližší plánovaný čas.</p>
     </section>
 
-    <!-- Posledný signál -->
+    <!-- Signal -->
     <section id="signalBox" class="hidden">
       <div class="p-6 border rounded-xl bg-white">
         <div class="flex items-center justify-between mb-4">
@@ -63,16 +63,9 @@
           <table class="min-w-full text-sm">
             <thead>
               <tr class="text-left text-slate-600 border-b">
-                <th class="py-2">#</th>
-                <th class="py-2">Symbol</th>
-                <th class="py-2">Názov</th>
-                <th class="py-2">Cena</th>
-                <th class="py-2">Skóre</th>
-                <th class="py-2">Váha</th>
-                <th class="py-2">24h</th>
-                <th class="py-2">ATR%</th>
-                <th class="py-2">Spark</th>
-                <th class="py-2">Akcia</th>
+                <th class="py-2">#</th><th class="py-2">Symbol</th><th class="py-2">Názov</th>
+                <th class="py-2">Cena</th><th class="py-2">Skóre</th><th class="py-2">Váha</th>
+                <th class="py-2">24h</th><th class="py-2">ATR%</th><th class="py-2">Spark</th><th class="py-2">Akcia</th>
               </tr>
             </thead>
             <tbody id="picksBody"></tbody>
@@ -87,20 +80,15 @@
     <section id="wildBox" class="mt-6 p-6 border rounded-xl bg-white hidden">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-lg font-semibold">Žolíky AI (experiment)</h2>
-        <div class="text-xs text-slate-500">AI odporúčanie – stále len na tvoje manuálne rozhodnutie</div>
+        <div class="text-xs text-slate-500">AI odporúčanie – manuálne rozhodnutie</div>
       </div>
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead>
             <tr class="text-left text-slate-600 border-b">
-              <th class="py-2">Symbol</th>
-              <th class="py-2">Názov</th>
-              <th class="py-2">Cena</th>
-              <th class="py-2">News hits</th>
-              <th class="py-2">AI verdikt</th>
-              <th class="py-2">AI dôvod</th>
-              <th class="py-2">Horizont</th>
-              <th class="py-2">Akcia</th>
+              <th class="py-2">Symbol</th><th class="py-2">Názov</th><th class="py-2">Cena</th>
+              <th class="py-2">News hits</th><th class="py-2">AI verdikt</th><th class="py-2">AI dôvod</th>
+              <th class="py-2">Horizont</th><th class="py-2">Akcia</th>
             </tr>
           </thead>
           <tbody id="wildBody"></tbody>
@@ -108,7 +96,27 @@
       </div>
     </section>
 
-    <!-- Portfólio -->
+    <!-- Dip-Buy -->
+    <section id="dipsBox" class="mt-6 p-6 border rounded-xl bg-white hidden">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">Dip-Buy (najväčší prepad s odrazom)</h2>
+        <div class="text-xs text-slate-500">Max 2 coiny, malá váha, tvrdé SL/TP</div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-600 border-b">
+              <th class="py-2">Symbol</th><th class="py-2">Názov</th><th class="py-2">Cena</th>
+              <th class="py-2">7d</th><th class="py-2">3h</th><th class="py-2">ATR%</th>
+              <th class="py-2">RSI</th><th class="py-2">Horizont</th><th class="py-2">SL / TP1 / TP2</th><th class="py-2">Akcia</th>
+            </tr>
+          </thead>
+          <tbody id="dipsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Portfolio -->
     <section id="portfolioBox" class="mt-6 p-6 border rounded-xl bg-white hidden">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-lg font-semibold">Portfólio</h2>
@@ -117,22 +125,14 @@
         </div>
       </div>
       <div id="pfSummary" class="text-sm text-slate-600 mb-3">—</div>
-
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead>
             <tr class="text-left text-slate-600 border-b">
-              <th class="py-2">ID</th>
-              <th class="py-2">Symbol</th>
-              <th class="py-2">Investované (€)</th>
-              <th class="py-2">Units</th>
-              <th class="py-2">Buy (USD)</th>
-              <th class="py-2">Last (USD)</th>
-              <th class="py-2">Unrealized PnL (€)</th>
-              <th class="py-2">Unrealized ROI %</th>
-              <th class="py-2">SL / TP1 / TP2 (USD)</th>
-              <th class="py-2">Pozn.</th>
-              <th class="py-2">Akcia</th>
+              <th class="py-2">ID</th><th class="py-2">Symbol</th><th class="py-2">Investované (€)</th>
+              <th class="py-2">Units</th><th class="py-2">Buy (USD)</th><th class="py-2">Last (USD)</th>
+              <th class="py-2">Unrealized PnL (€)</th><th class="py-2">Unrealized ROI %</th>
+              <th class="py-2">SL / TP1 / TP2 (USD)</th><th class="py-2">Pozn.</th><th class="py-2">Akcia</th>
             </tr>
           </thead>
           <tbody id="pfBody"></tbody>
@@ -154,6 +154,9 @@
     const wildBox = document.getElementById('wildBox');
     const wildBody = document.getElementById('wildBody');
 
+    const dipsBox = document.getElementById('dipsBox');
+    const dipsBody = document.getElementById('dipsBody');
+
     const pfBox = document.getElementById('portfolioBox');
     const pfBody = document.getElementById('pfBody');
     const pfSummary = document.getElementById('pfSummary');
@@ -163,6 +166,7 @@
     const resetBudgetBtn = document.getElementById('resetBudgetBtn');
     const batchBtn = document.getElementById('batchInvestBtn');
     const wildBtn = document.getElementById('wildBtn');
+    const dipBtn = document.getElementById('dipBtn');
     const BUDGET_KEY = 'kb_budget_eur';
 
     function getBudget(){const v=Number(localStorage.getItem(BUDGET_KEY)||'1000');return isFinite(v)&&v>=0?v:1000}
@@ -205,8 +209,7 @@
             <td class="py-2 font-mono">${(Number(p.atr_pct)*100).toFixed(2)}%</td>
             <td class="py-2 text-slate-500">${mkSparkline(p.spark||[])}</td>
             <td class="py-2">
-              <button
-                class="px-3 py-1 rounded bg-emerald-600 text-white"
+              <button class="px-3 py-1 rounded bg-emerald-600 text-white"
                 data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
                 data-price="${Number(p.price)}" data-suggested="${suggested}"
                 onclick="invest(this)">
@@ -222,54 +225,80 @@
     // ---------- wildcards ----------
     async function runWildcards(){
       const btn=wildBtn; const old=btn.textContent; btn.textContent='Hľadám…'; btn.disabled=true;
-      try{
-        await fetch('/run-wildcards',{cache:'no-store'});
-        setTimeout(loadWildcards, 2500);
-      }finally{
-        setTimeout(()=>{btn.textContent=old; btn.disabled=false;}, 1500);
-      }
+      try{ await fetch('/run-wildcards',{cache:'no-store'}); setTimeout(loadWildcards, 2500); }
+      finally{ setTimeout(()=>{btn.textContent=old; btn.disabled=false;}, 1500); }
     }
     async function loadWildcards(){
       try{
         const r=await fetch('/wildcards',{cache:'no-store'}); const data=await r.json();
         if(!data.ok){wildBox.classList.add('hidden'); return}
-        const items=data.items||[];
-        if(items.length===0){wildBox.classList.add('hidden'); return}
-        wildBox.classList.remove('hidden');
-        wildBody.innerHTML='';
+        const items=data.items||[]; if(items.length===0){wildBox.classList.add('hidden'); return}
+        wildBox.classList.remove('hidden'); wildBody.innerHTML='';
         const budget=getBudget();
         items.forEach(p=>{
-          const suggested=roundToStep(budget*0.1,10);
-          const horiz = Number(p.ai_horizon_days||2);
-          const horizTxt = horiz < 1 ? `${Math.round(horiz*24)} h` : `${Math.round(horiz)} dní`;
+          const suggested=roundToStep(budget*0.10,10);
+          const horiz=Number(p.ai_horizon_days||2); const horizTxt=horiz<1?`${Math.round(horiz*24)} h`:`${Math.round(horiz)} dní`;
           const tr=document.createElement('tr'); tr.className='border-b';
           tr.innerHTML=`
-            <td class="py-2 font-semibold">${p.symbol}</td>
-            <td class="py-2">${p.name}</td>
+            <td class="py-2 font-semibold">${p.symbol}</td><td class="py-2">${p.name}</td>
             <td class="py-2 font-mono">${Number(p.price||0).toFixed(6)}</td>
             <td class="py-2 font-mono">${p.news_hits||0}</td>
-            <td class="py-2">${p.ai_approve ? '✅ odporúčané' : '⛔ zamietnuté'}</td>
+            <td class="py-2">${p.ai_approve?'✅ odporúčané':'⛔ zamietnuté'}</td>
             <td class="py-2">${p.ai_rationale||''}</td>
             <td class="py-2">${horizTxt}</td>
             <td class="py-2">
-              ${p.ai_approve
-                ? `<button class="px-3 py-1 rounded bg-indigo-700 text-white"
-                    data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
-                    data-price="${Number(p.price)||0}" data-suggested="${suggested}"
-                    onclick="invest(this)">Investovať ${suggested>0?`(&asymp; ${fmtEUR(Number(suggested))})`:''}</button>`
-                : '<span class="text-slate-400">—</span>'}
+              ${p.ai_approve?`<button class="px-3 py-1 rounded bg-indigo-700 text-white"
+                data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
+                data-price="${Number(p.price)||0}" data-suggested="${suggested}"
+                onclick="invest(this)">Investovať ${fmtEUR(Number(suggested))}</button>`:'<span class="text-slate-400">—</span>'}
             </td>`;
           wildBody.appendChild(tr);
         });
       }catch(e){console.error(e)}
     }
 
-    // ---------- PORTFÓLIO (chýbajúca funkcia – doplnená) ----------
+    // ---------- dips ----------
+    async function runDips(){
+      const btn=dipBtn; const old=btn.textContent; btn.textContent='Hľadám…'; btn.disabled=true;
+      try{ await fetch('/run-dips',{cache:'no-store'}); setTimeout(loadDips, 3000); }
+      finally{ setTimeout(()=>{btn.textContent=old; btn.disabled=false;}, 1500); }
+    }
+    async function loadDips(){
+      try{
+        const r=await fetch('/dips',{cache:'no-store'}); const data=await r.json();
+        const items=data.items||[]; if(items.length===0){dipsBox.classList.add('hidden'); return}
+        dipsBox.classList.remove('hidden'); dipsBody.innerHTML='';
+        const budget=getBudget();
+        items.forEach(p=>{
+          const suggested=roundToStep(budget*0.05,10); // ~5 % na coin
+          const horiz=p.horizon_days<1?`${Math.round(p.horizon_days*24)} h`:`${Math.round(p.horizon_days)} dní`;
+          const sl=`${Number(p.sl_usd).toFixed(4)}`, tp1=`${Number(p.tp1_usd).toFixed(4)}`, tp2=`${Number(p.tp2_usd).toFixed(4)}`;
+          const tr=document.createElement('tr'); tr.className='border-b';
+          tr.innerHTML=`
+            <td class="py-2 font-semibold">${p.symbol}</td><td class="py-2">${p.name}</td>
+            <td class="py-2 font-mono">${Number(p.price||0).toFixed(6)}</td>
+            <td class="py-2 font-mono">${(Number(p.mom_7d)*100).toFixed(1)}%</td>
+            <td class="py-2 font-mono">${(Number(p.mom_3h)*100).toFixed(1)}%</td>
+            <td class="py-2 font-mono">${(Number(p.atr_pct)*100).toFixed(1)}%</td>
+            <td class="py-2 font-mono">${Number(p.rsi||0).toFixed(1)}</td>
+            <td class="py-2">${horiz}</td>
+            <td class="py-2 font-mono">${sl} / ${tp1} / ${tp2}</td>
+            <td class="py-2">
+              <button class="px-3 py-1 rounded bg-orange-700 text-white"
+                data-id="${p.id}" data-symbol="${p.symbol}" data-name="${p.name}"
+                data-price="${Number(p.price)||0}" data-suggested="${suggested}"
+                onclick="invest(this)">Investovať ${fmtEUR(Number(suggested))}</button>
+            </td>`;
+          dipsBody.appendChild(tr);
+        });
+      }catch(e){console.error(e)}
+    }
+
+    // ---------- portfolio ----------
     async function loadPortfolio(){
       try{
         const r=await fetch('/api/trades',{cache:'no-store'});
-        const data=await r.json();
-        if(!data.ok){pfBox.classList.add('hidden');return}
+        const data=await r.json(); if(!data.ok){pfBox.classList.add('hidden');return}
         pfBox.classList.remove('hidden');
         pfSummary.textContent=`Otvorené: ${data.summary.open_trades} · Uzavreté: ${data.summary.closed_trades} · Investované spolu: ${Number(data.summary.invested_total_eur).toFixed(2)} € · Realizované PnL: ${Number(data.summary.realized_pnl_eur).toFixed(2)} €`;
         pfBody.innerHTML='';
@@ -299,7 +328,7 @@
       }catch(e){console.error(e)}
     }
 
-    // ---------- invest/batch/close/delete ----------
+    // ---------- invest/batch ----------
     async function invest(btn){
       const coin_id=btn.getAttribute('data-id');
       const symbol=btn.getAttribute('data-symbol');
@@ -358,7 +387,7 @@
     }
 
     // ---------- handlers ----------
-    document.getElementById('refreshBtn').addEventListener('click',()=>{loadSignal();loadPortfolio();loadWildcards()});
+    document.getElementById('refreshBtn').addEventListener('click',()=>{loadSignal();loadPortfolio();loadWildcards();loadDips()});
     document.getElementById('reloadPfBtn').addEventListener('click',loadPortfolio);
     document.getElementById('runNowBtn').addEventListener('click',async()=>{
       const btn=document.getElementById('runNowBtn');const old=btn.textContent;btn.textContent='Bežím…';btn.disabled=true;
@@ -366,9 +395,12 @@
       finally{setTimeout(()=>{btn.textContent=old;btn.disabled=false},1500)}
     });
     wildBtn.addEventListener('click', runWildcards);
+    dipBtn.addEventListener('click', runDips);
 
     // ---------- init ----------
-    initBudgetControls(); loadSignal(); loadPortfolio(); loadWildcards(); setInterval(()=>{loadSignal();loadPortfolio()},60000);
+    initBudgetControls();
+    loadSignal(); loadPortfolio(); loadWildcards(); loadDips();
+    setInterval(()=>{loadSignal();loadPortfolio()},60000);
   </script>
 </body>
 </html>
