@@ -7,19 +7,19 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 text-slate-800">
-  <div class="max-w-6xl mx-auto p-6">
+  <div class="max-w-7xl mx-auto p-6">
     <header class="mb-6">
       <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold">Krypto Broker – Dashboard</h1>
         <div class="flex gap-2">
+          <a href="/api/trades.csv" class="px-4 py-2 rounded-xl bg-white border">Export CSV</a>
           <button id="runNowBtn" class="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-90">Run now</button>
           <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-white border">Refresh</button>
         </div>
       </div>
 
-      <!-- Panel s rozpočtom pre návrh investície -->
       <div class="mt-4 p-4 bg-white border rounded-xl">
-        <div class="flex flex-col md:flex-row md:items-center md:gap-6 gap-3">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:gap-6 gap-3">
           <div class="text-sm text-slate-600">
             Plán: <span class="font-mono">07:30</span>, <span class="font-mono">13:00</span>, <span class="font-mono">22:00</span> ({{ tz }})
             · PRESELECT: <span class="font-mono">{{ preselect }}</span>
@@ -31,7 +31,7 @@
             <button id="saveBudgetBtn" class="px-3 py-2 rounded-lg bg-slate-900 text-white">Uložiť</button>
             <button id="resetBudgetBtn" class="px-3 py-2 rounded-lg bg-white border">Reset</button>
           </div>
-          <div id="status" class="text-sm text-slate-600 md:ml-auto">Načítavam…</div>
+          <div id="status" class="text-sm text-slate-600 lg:ml-auto">Načítavam…</div>
         </div>
       </div>
     </header>
@@ -50,8 +50,9 @@
             <div class="text-sm text-slate-500">Posledná aktualizácia</div>
             <div id="sigTime" class="text-lg font-semibold">—</div>
           </div>
-          <div>
+          <div class="flex items-center gap-2">
             <span id="regimeBadge" class="px-3 py-1 rounded-full text-sm font-semibold">—</span>
+            <button id="batchInvestBtn" class="px-3 py-1 rounded bg-emerald-700 text-white">Investovať podľa váh</button>
           </div>
         </div>
 
@@ -67,6 +68,7 @@
                 <th class="py-2">Váha</th>
                 <th class="py-2">24h</th>
                 <th class="py-2">ATR%</th>
+                <th class="py-2">Spark</th>
                 <th class="py-2">Akcia</th>
               </tr>
             </thead>
@@ -94,13 +96,14 @@
             <tr class="text-left text-slate-600 border-b">
               <th class="py-2">ID</th>
               <th class="py-2">Symbol</th>
-              <th class="py-2">Názov</th>
               <th class="py-2">Investované (€)</th>
-              <th class="py-2">Kúpené</th>
-              <th class="py-2">Predané (€)</th>
-              <th class="py-2">Ukončené</th>
-              <th class="py-2">PnL (€)</th>
-              <th class="py-2">ROI %</th>
+              <th class="py-2">Units</th>
+              <th class="py-2">Buy (USD)</th>
+              <th class="py-2">Last (USD)</th>
+              <th class="py-2">Unrealized PnL (€)</th>
+              <th class="py-2">Unrealized ROI %</th>
+              <th class="py-2">SL / TP1 / TP2 (USD)</th>
+              <th class="py-2">Pozn.</th>
               <th class="py-2">Akcia</th>
             </tr>
           </thead>
@@ -111,7 +114,7 @@
   </div>
 
   <script>
-    // -------- Pomocné --------
+    // ---------- helpers ----------
     const statusEl = document.getElementById('status');
     const emptyBox = document.getElementById('emptyBox');
     const signalBox = document.getElementById('signalBox');
@@ -127,20 +130,26 @@
     const budgetInput = document.getElementById('budgetInput');
     const saveBudgetBtn = document.getElementById('saveBudgetBtn');
     const resetBudgetBtn = document.getElementById('resetBudgetBtn');
+    const batchBtn = document.getElementById('batchInvestBtn');
     const BUDGET_KEY = 'kb_budget_eur';
 
     function getBudget(){const v=Number(localStorage.getItem(BUDGET_KEY)||'1000');return isFinite(v)&&v>=0?v:1000}
     function setBudget(v){localStorage.setItem(BUDGET_KEY,String(v))}
     function roundToStep(v,step=10){if(!isFinite(v))return 0;return Math.round(v/step)*step}
     function fmtEUR(v){try{return new Intl.NumberFormat('sk-SK',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v)}catch{return `${Math.round(v)} €`}}
+    function mkSparkline(arr){ if(!arr||arr.length<2) return '';
+      const w=80,h=24; const min=Math.min(...arr), max=Math.max(...arr); const span=max-min||1;
+      const pts=arr.map((v,i)=>{const x=i*(w/(arr.length-1)); const y=h - ((v-min)/span)*h; return `${x.toFixed(1)},${y.toFixed(1)}`}).join(' ');
+      return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="currentColor" stroke-width="1" points="${pts}"/></svg>`;
+    }
 
-    // -------- Signál --------
+    // ---------- signal ----------
     async function loadSignal(){
       statusEl.textContent='Načítavam…';
       try{
         const r=await fetch('/signal',{cache:'no-store'});
         const data=await r.json();
-        if(!data.ready){emptyBox.classList.remove('hidden');signalBox.classList.add('hidden');statusEl.textContent='Žiadny signál – skús Run now alebo počkaj na ďalší beh.';return}
+        if(!data.ready){emptyBox.classList.remove('hidden');signalBox.classList.add('hidden');statusEl.textContent='Žiadny signál – skús Run now alebo počkaj.';return}
         emptyBox.classList.add('hidden');signalBox.classList.remove('hidden');statusEl.textContent='OK';
         sigTime.textContent=data.created_at||'—';
         const regime=(data.regime||'').toLowerCase();
@@ -152,7 +161,7 @@
         (data.picks||[]).forEach((p,idx)=>{
           const w=Number(p.weight||0);
           const suggested=roundToStep(budget*w,10);
-          const tr=document.createElement('tr');tr.className='border-b';
+          const tr=document.createElement('tr'); tr.className='border-b';
           tr.innerHTML=`
             <td class="py-2">${idx+1}</td>
             <td class="py-2 font-semibold">${p.symbol}</td>
@@ -162,6 +171,7 @@
             <td class="py-2 font-mono">${w.toFixed(3)}</td>
             <td class="py-2 font-mono">${(Number(p.mom_24h)*100).toFixed(2)}%</td>
             <td class="py-2 font-mono">${(Number(p.atr_pct)*100).toFixed(2)}%</td>
+            <td class="py-2 text-slate-500">${mkSparkline(p.spark||[])}</td>
             <td class="py-2">
               <button
                 class="px-3 py-1 rounded bg-emerald-600 text-white"
@@ -177,7 +187,7 @@
       }catch(e){console.error(e);statusEl.textContent='Chyba pri načítaní.'}
     }
 
-    // -------- Invest / Close / Delete --------
+    // ---------- invest / batch / close / delete / notes ----------
     async function invest(btn){
       const coin_id=btn.getAttribute('data-id');
       const symbol=btn.getAttribute('data-symbol');
@@ -188,24 +198,52 @@
       const amt=prompt(`Koľko chceš investovať do ${symbol}? (EUR)\nNávrh: ${fmtEUR(Number(def))}`,def);
       if(!amt)return;
       const payload={coin_id,symbol,name,invested_eur:Number(amt),buy_price_usd:price};
-      await fetch('/api/trades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const r=await fetch('/api/trades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const j=await r.json(); if(!j.ok) alert(j.error||'Chyba');
       loadPortfolio();
     }
+
+    batchBtn.addEventListener('click', async ()=>{
+      const budget=getBudget();
+      const rows=[...document.querySelectorAll('#picksBody tr')];
+      if(rows.length===0) return;
+      const items=rows.map(tr=>{
+        const btn=tr.querySelector('button[data-id]');
+        const suggested=Number(btn.getAttribute('data-suggested')||'0');
+        return {
+          coin_id: btn.getAttribute('data-id'),
+          symbol: btn.getAttribute('data-symbol'),
+          name: btn.getAttribute('data-name'),
+          invested_eur: suggested>0?suggested:0,
+          buy_price_usd: Number(btn.getAttribute('data-price')||'0')
+        }
+      }).filter(x=>x.invested_eur>0);
+      if(items.length===0){alert('Žiadne váhy / návrhy.'); return;}
+      if(!confirm(`Vytvoriť ${items.length} obchodov celkovo za ~${fmtEUR(items.reduce((a,b)=>a+b.invested_eur,0))}?`)) return;
+      const r=await fetch('/api/trades/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+      const j=await r.json(); if(!j.ok) alert(j.error||'Chyba'); else alert('Hotovo.');
+      loadPortfolio();
+    });
 
     async function closeTrade(id){
-      const amt=prompt("Za koľko EUR si predal?","120");
-      if(!amt)return;
-      await fetch(`/api/trades/${id}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sold_eur:Number(amt)})});
+      const amt=prompt("Za koľko EUR si predal?","120"); if(!amt)return;
+      const r=await fetch(`/api/trades/${id}/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sold_eur:Number(amt)})});
+      const j=await r.json(); if(!j.ok) alert(j.error||'Chyba');
       loadPortfolio();
     }
-
     async function deleteTrade(id){
-      if(!confirm('Zrušiť tento otvorený obchod? Táto akcia je nevratná.')) return;
-      await fetch(`/api/trades/${id}`,{method:'DELETE'});
+      if(!confirm('Zrušiť tento otvorený obchod?')) return;
+      const r=await fetch(`/api/trades/${id}`,{method:'DELETE'});
+      const j=await r.json(); if(!j.ok) alert(j.error||'Chyba');
       loadPortfolio();
     }
+    async function editNote(id,old){
+      const v=prompt('Poznámka:', old||''); if(v===null) return;
+      // urobíme to cez POST create s 0€? nie; jednoduchšie: necháme to takto – poznámky upravíme neskôr endpointom.
+      alert('Úprava poznámky zatiaľ nie je implementovaná na serveri.');
+    }
 
-    // -------- Portfólio --------
+    // ---------- portfolio ----------
     async function loadPortfolio(){
       try{
         const r=await fetch('/api/trades',{cache:'no-store'});
@@ -215,17 +253,20 @@
         pfSummary.textContent=`Otvorené: ${data.summary.open_trades} · Uzavreté: ${data.summary.closed_trades} · Investované spolu: ${Number(data.summary.invested_total_eur).toFixed(2)} € · Realizované PnL: ${Number(data.summary.realized_pnl_eur).toFixed(2)} €`;
         pfBody.innerHTML='';
         (data.items||[]).forEach(t=>{
-          const tr=document.createElement('tr');tr.className='border-b';
+          const upnl = t.unrealized_pnl_eur==null ? '—' : Number(t.unrealized_pnl_eur).toFixed(2)+' €';
+          const uroi = t.unrealized_roi_pct==null ? '—' : Number(t.unrealized_roi_pct).toFixed(2)+' %';
+          const tr=document.createElement('tr'); tr.className='border-b';
           tr.innerHTML=`
             <td class="py-2">${t.id}</td>
             <td class="py-2 font-semibold">${t.symbol}</td>
-            <td class="py-2">${t.name}</td>
             <td class="py-2 font-mono">${Number(t.invested_eur).toFixed(2)}</td>
-            <td class="py-2">${t.invested_at?.replace('T',' ').replace('Z','')}</td>
-            <td class="py-2 font-mono">${t.sold_eur!==null?Number(t.sold_eur).toFixed(2):'—'}</td>
-            <td class="py-2">${t.sold_at?t.sold_at.replace('T',' ').replace('Z',''):'—'}</td>
-            <td class="py-2 font-mono">${t.pnl_eur===null?'—':Number(t.pnl_eur).toFixed(2)}</td>
-            <td class="py-2 font-mono">${t.roi_pct===null?'—':Number(t.roi_pct).toFixed(2)}</td>
+            <td class="py-2 font-mono">${t.units?Number(t.units).toFixed(6):'—'}</td>
+            <td class="py-2 font-mono">${t.buy_price_usd?Number(t.buy_price_usd).toFixed(6):'—'}</td>
+            <td class="py-2 font-mono">${t.last_price_usd?Number(t.last_price_usd).toFixed(6):'—'}</td>
+            <td class="py-2 font-mono">${upnl}</td>
+            <td class="py-2 font-mono">${uroi}</td>
+            <td class="py-2 font-mono">${t.sl_usd?Number(t.sl_usd).toFixed(6):'—'} / ${t.tp1_usd?Number(t.tp1_usd).toFixed(6):'—'} / ${t.tp2_usd?Number(t.tp2_usd).toFixed(6):'—'}</td>
+            <td class="py-2">${t.note||''}</td>
             <td class="py-2 flex gap-2">
               ${t.sold_eur===null
                 ? `<button class="px-3 py-1 rounded bg-amber-600 text-white" onclick="closeTrade(${t.id})">Ukončiť</button>
@@ -237,7 +278,7 @@
       }catch(e){console.error(e)}
     }
 
-    // -------- Ovládanie rozpočtu --------
+    // ---------- ovládanie rozpočtu ----------
     function initBudgetControls(){
       budgetInput.value=String(getBudget());
       saveBudgetBtn.addEventListener('click',()=>{const v=Number(budgetInput.value||'0');if(!isFinite(v)||v<0)return alert('Zadaj kladné číslo.');setBudget(v);loadSignal()});
@@ -245,7 +286,7 @@
       budgetInput.addEventListener('keydown',(e)=>{if(e.key==='Enter')saveBudgetBtn.click()});
     }
 
-    // -------- Handlery --------
+    // ---------- handlers ----------
     document.getElementById('refreshBtn').addEventListener('click',()=>{loadSignal();loadPortfolio()});
     document.getElementById('reloadPfBtn').addEventListener('click',loadPortfolio);
     document.getElementById('runNowBtn').addEventListener('click',async()=>{
@@ -254,8 +295,8 @@
       finally{setTimeout(()=>{btn.textContent=old;btn.disabled=false},1500)}
     });
 
-    // -------- Init --------
-    initBudgetControls();loadSignal();loadPortfolio();setInterval(()=>{loadSignal();loadPortfolio()},60000);
+    // ---------- init ----------
+    initBudgetControls(); loadSignal(); loadPortfolio(); setInterval(()=>{loadSignal();loadPortfolio()},60000);
   </script>
 </body>
 </html>
