@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Krypto Broker – Dashboard</title>
+  <!-- minimal favicon, aby nebola 404 -->
+  <link rel="icon" href="data:,">
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -159,7 +161,7 @@
     const budgetInput = document.getElementById('budgetInput');
     const saveBudgetBtn = document.getElementById('saveBudgetBtn');
     const resetBudgetBtn = document.getElementById('resetBudgetBtn');
-    const batchBtn = document.getElementById('batchInvestBtn'); // <-- len raz
+    const batchBtn = document.getElementById('batchInvestBtn');
     const wildBtn = document.getElementById('wildBtn');
     const BUDGET_KEY = 'kb_budget_eur';
 
@@ -258,6 +260,41 @@
                 : '<span class="text-slate-400">—</span>'}
             </td>`;
           wildBody.appendChild(tr);
+        });
+      }catch(e){console.error(e)}
+    }
+
+    // ---------- PORTFÓLIO (chýbajúca funkcia – doplnená) ----------
+    async function loadPortfolio(){
+      try{
+        const r=await fetch('/api/trades',{cache:'no-store'});
+        const data=await r.json();
+        if(!data.ok){pfBox.classList.add('hidden');return}
+        pfBox.classList.remove('hidden');
+        pfSummary.textContent=`Otvorené: ${data.summary.open_trades} · Uzavreté: ${data.summary.closed_trades} · Investované spolu: ${Number(data.summary.invested_total_eur).toFixed(2)} € · Realizované PnL: ${Number(data.summary.realized_pnl_eur).toFixed(2)} €`;
+        pfBody.innerHTML='';
+        (data.items||[]).forEach(t=>{
+          const upnl = t.unrealized_pnl_eur==null ? '—' : Number(t.unrealized_pnl_eur).toFixed(2)+' €';
+          const uroi = t.unrealized_roi_pct==null ? '—' : Number(t.unrealized_roi_pct).toFixed(2)+' %';
+          const tr=document.createElement('tr'); tr.className='border-b';
+          tr.innerHTML=`
+            <td class="py-2">${t.id}</td>
+            <td class="py-2 font-semibold">${t.symbol}</td>
+            <td class="py-2 font-mono">${Number(t.invested_eur).toFixed(2)}</td>
+            <td class="py-2 font-mono">${t.units?Number(t.units).toFixed(6):'—'}</td>
+            <td class="py-2 font-mono">${t.buy_price_usd?Number(t.buy_price_usd).toFixed(6):'—'}</td>
+            <td class="py-2 font-mono">${t.last_price_usd?Number(t.last_price_usd).toFixed(6):'—'}</td>
+            <td class="py-2 font-mono">${upnl}</td>
+            <td class="py-2 font-mono">${uroi}</td>
+            <td class="py-2 font-mono">${t.sl_usd?Number(t.sl_usd).toFixed(6):'—'} / ${t.tp1_usd?Number(t.tp1_usd).toFixed(6):'—'} / ${t.tp2_usd?Number(t.tp2_usd).toFixed(6):'—'}</td>
+            <td class="py-2">${t.note||''}</td>
+            <td class="py-2 flex gap-2">
+              ${t.sold_eur===null
+                ? `<button class="px-3 py-1 rounded bg-amber-600 text-white" onclick="closeTrade(${t.id})">Ukončiť</button>
+                   <button class="px-3 py-1 rounded bg-rose-600 text-white" onclick="deleteTrade(${t.id})">❌ Zrušiť</button>`
+                : '<span class="text-slate-400">—</span>'}
+            </td>`;
+          pfBody.appendChild(tr);
         });
       }catch(e){console.error(e)}
     }
