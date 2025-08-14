@@ -159,7 +159,7 @@
     const budgetInput = document.getElementById('budgetInput');
     const saveBudgetBtn = document.getElementById('saveBudgetBtn');
     const resetBudgetBtn = document.getElementById('resetBudgetBtn');
-    const batchBtn = document.getElementById('batchInvestBtn');
+    const batchBtn = document.getElementById('batchInvestBtn'); // <-- len raz
     const wildBtn = document.getElementById('wildBtn');
     const BUDGET_KEY = 'kb_budget_eur';
 
@@ -237,7 +237,7 @@
         wildBody.innerHTML='';
         const budget=getBudget();
         items.forEach(p=>{
-          const suggested=roundToStep(budget*0.1,10); // napr. ~10 % rozpočtu per žolík (môžeš zmeniť ručne)
+          const suggested=roundToStep(budget*0.1,10);
           const horiz = Number(p.ai_horizon_days||2);
           const horizTxt = horiz < 1 ? `${Math.round(horiz*24)} h` : `${Math.round(horiz)} dní`;
           const tr=document.createElement('tr'); tr.className='border-b';
@@ -262,12 +262,12 @@
       }catch(e){console.error(e)}
     }
 
-    // ---------- invest / batch / close / delete ----------
+    // ---------- invest/batch/close/delete ----------
     async function invest(btn){
       const coin_id=btn.getAttribute('data-id');
       const symbol=btn.getAttribute('data-symbol');
       const name=btn.getAttribute('data-name');
-      const price=Number(btn.getAttribute('data-price')||'0'); // USD
+      const price=Number(btn.getAttribute('data-price')||'0');
       const suggested=Number(btn.getAttribute('data-suggested')||'0');
       const def=suggested>0?String(suggested):"100";
       const amt=prompt(`Koľko chceš investovať do ${symbol}? (EUR)\nNávrh: ${fmtEUR(Number(def))}`,def);
@@ -278,7 +278,6 @@
       loadPortfolio();
     }
 
-    const batchBtn = document.getElementById('batchInvestBtn');
     batchBtn.addEventListener('click', async ()=>{
       const rows=[...document.querySelectorAll('#picksBody tr')];
       if(rows.length===0) return;
